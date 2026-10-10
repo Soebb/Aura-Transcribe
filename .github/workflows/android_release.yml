@@ -86,6 +86,11 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    env:
+      KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+      STORE_PASS: ${{ secrets.STORE_PASS }}
+      KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+      KEY_PASS: ${{ secrets.KEY_PASS }}
 
     steps:
     - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.2.2
@@ -255,11 +260,16 @@ jobs:
 
         # Same rule for apksigner: its status must not be swallowed by the pipe.
         "${BT}apksigner" verify --print-certs "$APK" | tee apk-cert.txt
-        grep -q 'Signer #1 certificate SHA-256 digest:' apk-cert.txt || {
-          echo "::error::apksigner reported no signer certificate — the APK is not signed"
+        RELEASE_SHA=$(grep -ioP 'certificate SHA-?256 digest: \K[0-9a-f]+' apk-cert.txt | head -1 | tr 'A-F' 'a-f' || true)
+        if [ -z "$RELEASE_SHA" ]; then
+          # Fallback via keytool directly on the archive, exactly like the AAB gate
+          RELEASE_SHA=$(keytool -printcert -jarfile "$APK" 2>/dev/null \
+            | grep -oP 'SHA256: \K[0-9A-Fa-f:]+' | tr -d ':' | tr 'A-F' 'a-f' | head -1 || true)
+        fi
+        if [ -z "$RELEASE_SHA" ]; then
+          echo "::error::apksigner and keytool reported no signer certificate — the APK is not signed"
           exit 1
-        }
-        RELEASE_SHA=$(grep -oP 'certificate SHA-256 digest: \K[0-9a-f]+' apk-cert.txt | head -1)
+        fi
         DEBUG_SHA=$(keytool -list -v -keystore keystore/debug.keystore -storepass android \
           -alias androiddebugkey | grep -oP 'SHA256: \K[0-9A-Fa-f:]+' | tr -d ':' | tr 'A-F' 'a-f')
         if [ -n "$DEBUG_SHA" ] && [ "$RELEASE_SHA" = "$DEBUG_SHA" ]; then
