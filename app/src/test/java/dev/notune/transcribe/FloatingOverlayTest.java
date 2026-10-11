@@ -137,4 +137,69 @@ public class FloatingOverlayTest {
         int snappedX = FloatingOverlayService.calculateNearestEdgeX(scaledX, bubbleWidth, newScreenWidth);
         assertEquals(2280, snappedX);
     }
+
+    @Test
+    public void testCalculateDockedXOneThirdVisible() {
+        int screenWidth = 1080;
+        int bubbleWidth = 120;
+        float offscreenRatio = FloatingOverlayService.DOCKED_OFFSCREEN_RATIO; // 2.0f / 3.0f
+
+        // Left edge: -80, so 120 - 80 = 40 (1/3 of 120) remains visible
+        int leftDocked = FloatingOverlayService.calculateDockedX(true, bubbleWidth, screenWidth, offscreenRatio);
+        assertEquals(-80, leftDocked);
+
+        // Right edge: 1080 - 120 + 80 = 1040, so 1080 - 1040 = 40 (1/3 of 120) remains visible
+        int rightDocked = FloatingOverlayService.calculateDockedX(false, bubbleWidth, screenWidth, offscreenRatio);
+        assertEquals(1040, rightDocked);
+    }
+
+    @Test
+    public void testCalculateImeAvoidanceYWhenCovered() {
+        int screenHeight = 1920;
+        int bubbleHeight = 120;
+        int statusBar = 48;
+        int margin = 24;
+        int imeHeight = 600; // imeTop = 1920 - 600 = 1320
+        int currentY = 1500; // bubble bottom = 1500 + 120 = 1620 > 1320 -> covered
+
+        int targetY = FloatingOverlayService.calculateImeAvoidanceY(currentY, bubbleHeight, screenHeight, statusBar, imeHeight, margin);
+        // expected: imeTop - bubbleHeight - margin = 1320 - 120 - 24 = 1176
+        assertEquals(1176, targetY);
+        assertTrue(targetY + bubbleHeight <= screenHeight - imeHeight);
+    }
+
+    @Test
+    public void testCalculateImeAvoidanceYWhenNotCovered() {
+        int screenHeight = 1920;
+        int bubbleHeight = 120;
+        int statusBar = 48;
+        int margin = 24;
+        int imeHeight = 600; // imeTop = 1320
+        int currentY = 500; // bubble bottom = 620 < 1320 -> not covered
+
+        int targetY = FloatingOverlayService.calculateImeAvoidanceY(currentY, bubbleHeight, screenHeight, statusBar, imeHeight, margin);
+        assertEquals(500, targetY);
+    }
+
+    @Test
+    public void testCalculateImeAvoidanceYZeroImeHeight() {
+        int screenHeight = 1920;
+        int bubbleHeight = 120;
+        int statusBar = 48;
+        int margin = 24;
+        assertEquals(1500, FloatingOverlayService.calculateImeAvoidanceY(1500, bubbleHeight, screenHeight, statusBar, 0, margin));
+        assertEquals(1500, FloatingOverlayService.calculateImeAvoidanceY(1500, bubbleHeight, screenHeight, statusBar, -100, margin));
+    }
+
+    @Test
+    public void testCalculateImeAvoidanceYClampedToStatusBar() {
+        int screenHeight = 1000;
+        int bubbleHeight = 200;
+        int statusBar = 100;
+        int margin = 50;
+        int imeHeight = 900; // imeTop = 100
+        // targetY would be 100 - 200 - 50 = -150 -> clamped to statusBar (100)
+        int targetY = FloatingOverlayService.calculateImeAvoidanceY(500, bubbleHeight, screenHeight, statusBar, imeHeight, margin);
+        assertEquals(statusBar, targetY);
+    }
 }

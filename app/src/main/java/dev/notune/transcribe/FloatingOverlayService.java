@@ -26,8 +26,10 @@ import android.view.LayoutInflater;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewConfiguration;
+import android.view.ViewTreeObserver;
 import android.view.WindowInsets;
 import android.view.WindowManager;
+import android.view.WindowMetrics;
 import android.widget.Button;
 import android.widget.ImageView;
 import android.widget.ProgressBar;
@@ -126,9 +128,14 @@ public class FloatingOverlayService extends Service {
     private final Runnable mFadeStopFallback = this::stopSelf;
 
     private static final long INACTIVITY_DOCK_DELAY_MS = 2500L;
+    public static final float DOCKED_OFFSCREEN_RATIO = 2.0f / 3.0f;
     private ValueAnimator mSnapAnimator;
     private ValueAnimator mDockAnimator;
+    private ValueAnimator mYAnimator;
     private boolean mIsDocked = false;
+    private boolean mIsDockedLeft = false;
+    private int mPreImeY = -1;
+    private int mLastImeHeight = 0;
     private static volatile boolean sIsRunning = false;
 
     public static boolean isRunning() {
@@ -357,6 +364,45 @@ public class FloatingOverlayService extends Service {
         setupGestureAndListeners();
         mWindowManager.addView(mOverlayView, mParams);
         mLastScreenWidth = getRealScreenWidth();
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            mOverlayView.setOnApplyWindowInsetsListener((v, insets) -> {
+                int imeHeight = insets.getInsets(WindowInsets.Type.ime()).bottom;
+                handleImeVisibility(imeHeight);
+                return insets;
+            });
+        }
+        mOverlayView.getViewTreeObserver().addOnGlobalLayoutListener(() -> {
+            if (mIsDestroyed || mWindowManager == null) return;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                try {
+                    WindowMetrics metrics = mWindowManager.getCurrentWindowMetrics();
+                    int imeHeight = metrics.getWindowInsets().getInsets(WindowInsets.Type.ime()).bottom;
+                    handleImeVisibility(imeHeight);
+                } catch (Throwable ignored) {}
+            }
+        });
+        FloatingDictationAccessibilityService.setFocusListener(isEditableFocused -> {
+            if (mMainHandler != null) {
+                mMainHandler.post(() -> {
+                    if (mIsDestroyed) return;
+                    if (isEditableFocused) {
+                        int imeHeight = 0;
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && mWindowManager != null) {
+                            try {
+                                imeHeight = mWindowManager.getCurrentWindowMetrics()
+                                        .getWindowInsets().getInsets(WindowInsets.Type.ime()).bottom;
+                            } catch (Throwable ignored) {}
+                        }
+                        if (imeHeight <= 0) {
+                            imeHeight = (int) (getRealScreenHeight() * 0.35f);
+                        }
+                        handleImeVisibility(imeHeight);
+                    } else {
+                        handleImeVisibility(0);
+                    }
+                });
+            }
+        });
         scheduleInactivityTimer();
     }
 
@@ -369,6 +415,7 @@ public class FloatingOverlayService extends Service {
             private int initialX, initialY;
             private float initialTouchX, initialTouchY;
             private boolean isClick = false;
+            private boolean mHasStartedDrag = false;
 
             @Override
             public boolean onTouch(View v, MotionEvent event) {
@@ -381,40 +428,46 @@ public class FloatingOverlayService extends Service {
                     case MotionEvent.ACTION_DOWN:
                         cancelInactivityTimer();
                         cancelAnimators();
-                        undockAndRestoreOpacity(false);
+                        mWasDockedOnDown = mIsDocked;
                         initialX = mParams.x;
                         initialY = mParams.y;
                         initialTouchX = event.getRawX();
                         initialTouchY = event.getRawY();
                         isClick = true;
-                        showDismissTarget();
+                        mHasStartedDrag = false;
                         return true;
                     case MotionEvent.ACTION_MOVE:
                         int dx = (int) (event.getRawX() - initialTouchX);
                         int dy = (int) (event.getRawY() - initialTouchY);
-                        if (Math.abs(dx) > 10 || Math.abs(dy) > 10) {
-                            if (isClick && v != null) {
+                        if (!mHasStartedDrag && (Math.abs(dx) > 10 || Math.abs(dy) > 10)) {
+                            mHasStartedDrag = true;
+                            isClick = false;
+                            mPreImeY = -1;
+                            undockAndRestoreOpacity(false);
+                            showDismissTarget();
+                            if (v != null) {
                                 try {
                                     v.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);
                                 } catch (Throwable ignored) {}
                             }
-                            isClick = false;
                         }
-                        mParams.x = initialX + dx;
-                        mParams.y = initialY + dy;
-                        // Keep the bubble position in sync for the panel expand/collapse
-                        // window resize (dragging only happens on the bubble itself).
-                        mBubbleX = mParams.x;
-                        mBubbleY = mParams.y;
-                        if (mWindowManager != null && mOverlayView != null) {
-                            try {
-                                mWindowManager.updateViewLayout(mOverlayView, mParams);
-                            } catch (Throwable t) {
-                                // View may already be detached (service stopping); ignore.
-                                Log.w(TAG, "updateViewLayout failed during drag", t);
+                        if (mHasStartedDrag) {
+                            mParams.x = initialX + dx;
+                            mParams.y = initialY + dy;
+                            // Keep the bubble position in sync for the panel expand/collapse
+                            // window resize (dragging only happens on the bubble itself).
+                            mBubbleX = mParams.x;
+                            mBubbleY = mParams.y;
+                            if (mWindowManager != null && mOverlayView != null) {
+                                try {
+                                    mWindowManager.updateViewLayout(mOverlayView, mParams);
+                                } catch (Throwable t) {
+                                    // View may already be detached (service stopping); ignore.
+                                    Log.w(TAG, "updateViewLayout failed during drag", t);
+                                }
                             }
+                            updateDismissTargetHover(event.getRawX(), event.getRawY());
                         }
-                        updateDismissTargetHover(event.getRawX(), event.getRawY());
                         return true;
                     case MotionEvent.ACTION_UP:
                         // Report the tap as a click: this custom onTouch handler
@@ -427,7 +480,12 @@ public class FloatingOverlayService extends Service {
                         if (dismissRequested) {
                             fadeOutAndStop();
                         } else if (isClick) {
-                            togglePanel();
+                            if (mWasDockedOnDown) {
+                                expandPanel();
+                                startRecordingSession();
+                            } else {
+                                togglePanel();
+                            }
                         } else {
                             snapToNearestEdge(null);
                         }
@@ -491,6 +549,12 @@ public class FloatingOverlayService extends Service {
                 stopRecordingSession();
             } else {
                 startRecordingSession();
+            }
+        });
+
+        mPanelRoot.setOnClickListener(v -> {
+            if (mIsRecording && mRecordContainer != null && mRecordContainer.getVisibility() == View.GONE) {
+                stopRecordingSession();
             }
         });
 
@@ -640,10 +704,9 @@ public class FloatingOverlayService extends Service {
     private void collapsePanel() {
         mPanelRoot.setVisibility(View.GONE);
         mBubbleRoot.setVisibility(View.VISIBLE);
-        undockAndRestoreOpacity(false);
         // Back to the small draggable bubble at the saved position.
         resizeWindow(false);
-        scheduleInactivityTimer();
+        snapToNearestEdge(null);
     }
 
     /**
@@ -676,7 +739,7 @@ public class FloatingOverlayService extends Service {
                         ? mBubbleRoot.getHeight() : (int) (64 * density);
                 int bubbleCenterY = mBubbleY + bubbleHeight / 2;
                 int minTop = statusBar + margin;
-                int maxTop = screenHeight - navBar - panelHeight - margin;
+                int maxTop = screenHeight - navBar - panelHeight - margin - mLastImeHeight;
                 int desiredTop = bubbleCenterY - panelHeight / 2;
                 int top = Math.max(minTop, Math.min(desiredTop, Math.max(minTop, maxTop)));
 
@@ -1109,6 +1172,7 @@ public class FloatingOverlayService extends Service {
         sIsRunning = false;
         mIsDestroyed = true;
         mCurrentSessionId++;
+        FloatingDictationAccessibilityService.setFocusListener(null);
         cancelInactivityTimer();
         cancelAnimators();
         if (mBubbleRoot != null) {
@@ -1196,6 +1260,141 @@ public class FloatingOverlayService extends Service {
         return isLeft ? -peekOffset : (screenWidth - bubbleWidth + peekOffset);
     }
 
+    static int calculateImeAvoidanceY(int currentY, int bubbleHeight, int screenHeight, int statusBarHeight, int imeHeight, int margin) {
+        if (imeHeight <= 0) {
+            return currentY;
+        }
+        int imeTop = screenHeight - imeHeight;
+        int bubbleBottom = currentY + bubbleHeight;
+        if (bubbleBottom > imeTop) {
+            int targetY = imeTop - bubbleHeight - margin;
+            return Math.max(statusBarHeight, targetY);
+        }
+        return currentY;
+    }
+
+    private void applyDockedAppearance(boolean isLeft) {
+        mIsDocked = true;
+        mIsDockedLeft = isLeft;
+        float density = getResources().getDisplayMetrics().density;
+        if (mBubbleCircle != null) {
+            mBubbleCircle.setBackgroundResource(isLeft ? R.drawable.bg_docked_pill_left : R.drawable.bg_docked_pill_right);
+            mBubbleCircle.setTranslationX(isLeft ? (6f * density) : (-6f * density));
+        }
+        if (mBubbleIcon != null) {
+            mBubbleIcon.setTranslationX(isLeft ? (21.5f * density) : (-21.5f * density));
+            mBubbleIcon.setScaleX(0.75f);
+            mBubbleIcon.setScaleY(0.75f);
+        }
+        if (mBubbleMicLevel != null) {
+            mBubbleMicLevel.setVisibility(View.INVISIBLE);
+        }
+        if (mBubbleRoot != null) {
+            mBubbleRoot.setAlpha(1.0f);
+        }
+    }
+
+    private void applyUndockedAppearance() {
+        mIsDocked = false;
+        if (mBubbleCircle != null) {
+            mBubbleCircle.setBackgroundResource(R.drawable.bg_record_circle);
+            mBubbleCircle.setTranslationX(0f);
+        }
+        if (mBubbleIcon != null) {
+            mBubbleIcon.setTranslationX(0f);
+            mBubbleIcon.setScaleX(1.0f);
+            mBubbleIcon.setScaleY(1.0f);
+        }
+        if (mBubbleMicLevel != null) {
+            mBubbleMicLevel.setVisibility(View.VISIBLE);
+        }
+        if (mBubbleRoot != null) {
+            mBubbleRoot.setAlpha(1.0f);
+        }
+    }
+
+    private void handleImeVisibility(int imeHeight) {
+        if (mIsDestroyed || mWindowManager == null || mOverlayView == null || mParams == null) return;
+        if (mLastImeHeight == imeHeight) return;
+        mLastImeHeight = imeHeight;
+
+        boolean isPanelOpen = (mPanelRoot != null && mPanelRoot.getVisibility() == View.VISIBLE);
+        if (isPanelOpen) {
+            if (imeHeight > 0) {
+                if (mRecordContainer != null) {
+                    mRecordContainer.setVisibility(View.GONE);
+                }
+            } else {
+                if (mRecordContainer != null) {
+                    mRecordContainer.setVisibility(View.VISIBLE);
+                }
+            }
+            resizeWindow(true);
+            return;
+        }
+
+        float density = getResources().getDisplayMetrics().density;
+        int bubbleHeight = (mBubbleRoot != null && mBubbleRoot.getHeight() > 0)
+                ? mBubbleRoot.getHeight() : (int) (64 * density);
+        int screenHeight = getRealScreenHeight();
+        int statusBar = systemBarInsets()[0];
+        int margin = (int) (16 * density);
+
+        if (imeHeight > 0) {
+            int targetY = calculateImeAvoidanceY(mParams.y, bubbleHeight, screenHeight, statusBar, imeHeight, margin);
+            if (targetY != mParams.y) {
+                if (mPreImeY < 0) {
+                    mPreImeY = mParams.y;
+                }
+                animateToY(targetY);
+            }
+        } else {
+            if (mPreImeY >= 0) {
+                int restoreY = mPreImeY;
+                mPreImeY = -1;
+                animateToY(restoreY);
+            }
+        }
+    }
+
+    private void animateToY(int targetY) {
+        if (mIsDestroyed || mWindowManager == null || mOverlayView == null || mParams == null) return;
+        if (mParams.y == targetY) return;
+        if (mYAnimator != null) {
+            mYAnimator.cancel();
+            mYAnimator = null;
+        }
+        int startY = mParams.y;
+        mYAnimator = ValueAnimator.ofInt(startY, targetY);
+        mYAnimator.setDuration(250);
+        mYAnimator.setInterpolator(new android.view.animation.DecelerateInterpolator());
+        mYAnimator.addUpdateListener(anim -> {
+            if (mIsDestroyed || mWindowManager == null || mOverlayView == null || mParams == null) return;
+            int yVal = (int) anim.getAnimatedValue();
+            mParams.y = yVal;
+            if (mPanelRoot == null || mPanelRoot.getVisibility() != View.VISIBLE) {
+                mBubbleY = yVal;
+            }
+            try {
+                mWindowManager.updateViewLayout(mOverlayView, mParams);
+            } catch (Throwable ignored) {}
+        });
+        mYAnimator.addListener(new android.animation.AnimatorListenerAdapter() {
+            @Override
+            public void onAnimationEnd(android.animation.Animator animation) {
+                if (mIsDestroyed) return;
+                mParams.y = targetY;
+                if (mPanelRoot == null || mPanelRoot.getVisibility() != View.VISIBLE) {
+                    mBubbleY = targetY;
+                }
+                try {
+                    mWindowManager.updateViewLayout(mOverlayView, mParams);
+                } catch (Throwable ignored) {}
+            }
+        });
+        mYAnimator.start();
+    }
+
     private void scheduleInactivityTimer() {
         cancelInactivityTimer();
         if (mIsDestroyed || mIsRecording || mResultPending) return;
@@ -1220,6 +1419,10 @@ public class FloatingOverlayService extends Service {
             mDockAnimator.cancel();
             mDockAnimator = null;
         }
+        if (mYAnimator != null) {
+            mYAnimator.cancel();
+            mYAnimator = null;
+        }
     }
 
     private void snapToNearestEdge(Runnable onEnd) {
@@ -1239,7 +1442,9 @@ public class FloatingOverlayService extends Service {
         int statusBar = systemBarInsets()[0];
 
         int startX = mParams.x;
-        int targetX = calculateNearestEdgeX(startX, bubbleWidth, screenWidth);
+        int nearestEdgeX = calculateNearestEdgeX(startX, bubbleWidth, screenWidth);
+        boolean isLeft = (nearestEdgeX == 0);
+        int targetX = calculateDockedX(isLeft, bubbleWidth, screenWidth, DOCKED_OFFSCREEN_RATIO);
 
         int startY = mParams.y;
         int targetY = clampY(startY, bubbleHeight, screenHeight, statusBar);
@@ -1250,6 +1455,7 @@ public class FloatingOverlayService extends Service {
         if (startX == targetX) {
             mParams.x = targetX;
             mBubbleX = targetX;
+            applyDockedAppearance(isLeft);
             saveBubblePosition();
             try {
                 mWindowManager.updateViewLayout(mOverlayView, mParams);
@@ -1257,7 +1463,6 @@ public class FloatingOverlayService extends Service {
                 Log.w(TAG, "updateViewLayout failed in snapToNearestEdge", t);
             }
             if (onEnd != null) onEnd.run();
-            scheduleInactivityTimer();
             return;
         }
 
@@ -1290,6 +1495,7 @@ public class FloatingOverlayService extends Service {
                 if (mIsDestroyed || mCanceled) return;
                 mParams.x = targetX;
                 mBubbleX = targetX;
+                applyDockedAppearance(isLeft);
                 if (mBubbleRoot != null) {
                     try {
                         mBubbleRoot.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);
@@ -1297,7 +1503,6 @@ public class FloatingOverlayService extends Service {
                 }
                 saveBubblePosition();
                 if (onEnd != null) onEnd.run();
-                scheduleInactivityTimer();
             }
         });
         mSnapAnimator.start();
@@ -1306,63 +1511,14 @@ public class FloatingOverlayService extends Service {
     private void enterDockedState() {
         if (mIsDestroyed || mIsRecording || mResultPending || mIsDocked) return;
         if (mPanelRoot != null && mPanelRoot.getVisibility() == View.VISIBLE) return;
-        if (mBubbleRoot == null || mOverlayView == null || mWindowManager == null || mParams == null) return;
-
-        mIsDocked = true;
-
-        float density = getResources().getDisplayMetrics().density;
-        int bubbleWidth = mBubbleRoot.getWidth() > 0 ? mBubbleRoot.getWidth() : (int) (64 * density);
-        int screenWidth = getRealScreenWidth();
-
-        boolean isLeft = (mParams.x + bubbleWidth / 2) < (screenWidth / 2);
-        int dockedTargetX = calculateDockedX(isLeft, bubbleWidth, screenWidth, 0.45f);
-
-        cancelAnimators();
-
-        int startX = mParams.x;
-        mDockAnimator = ValueAnimator.ofInt(startX, dockedTargetX);
-        mDockAnimator.setDuration(300);
-        mDockAnimator.setInterpolator(new android.view.animation.DecelerateInterpolator());
-        mDockAnimator.addUpdateListener(anim -> {
-            if (mIsDestroyed || mWindowManager == null || mOverlayView == null || mParams == null) return;
-            int xVal = (int) anim.getAnimatedValue();
-            mParams.x = xVal;
-            try {
-                mWindowManager.updateViewLayout(mOverlayView, mParams);
-            } catch (Throwable ignored) {}
-        });
-        mDockAnimator.addListener(new android.animation.AnimatorListenerAdapter() {
-            private boolean mCanceled = false;
-
-            @Override
-            public void onAnimationCancel(android.animation.Animator animation) {
-                mCanceled = true;
-            }
-
-            @Override
-            public void onAnimationEnd(android.animation.Animator animation) {
-                if (mIsDestroyed || mCanceled) return;
-                mParams.x = dockedTargetX;
-                try {
-                    mWindowManager.updateViewLayout(mOverlayView, mParams);
-                } catch (Throwable ignored) {}
-            }
-        });
-        mDockAnimator.start();
-
-        if (mBubbleRoot != null) {
-            mBubbleRoot.animate().alpha(0.5f).setDuration(300).start();
-        }
+        snapToNearestEdge(null);
     }
 
     private void undockAndRestoreOpacity(boolean animateX) {
         cancelInactivityTimer();
-        if (mBubbleRoot != null) {
-            mBubbleRoot.animate().cancel();
-            mBubbleRoot.setAlpha(1.0f);
-        }
-        if (!mIsDocked) return;
-        mIsDocked = false;
+        boolean wasDocked = mIsDocked;
+        applyUndockedAppearance();
+        if (!wasDocked) return;
 
         cancelAnimators();
 

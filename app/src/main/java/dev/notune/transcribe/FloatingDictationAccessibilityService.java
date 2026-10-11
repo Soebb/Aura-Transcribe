@@ -50,6 +50,16 @@ public class FloatingDictationAccessibilityService extends AccessibilityService 
      */
     private AccessibilityNodeInfo mLastFocusedNode = null;
 
+    public interface FocusChangeListener {
+        void onFocusChanged(boolean isEditableFocused);
+    }
+
+    private static volatile FocusChangeListener sFocusListener = null;
+
+    public static void setFocusListener(FocusChangeListener listener) {
+        sFocusListener = listener;
+    }
+
     public static FloatingDictationAccessibilityService getInstance() {
         return sInstance;
     }
@@ -112,6 +122,8 @@ public class FloatingDictationAccessibilityService extends AccessibilityService 
                 if (source.isEditable() && source.isEnabled()) {
                     clearLastFocusedNode();
                     mLastFocusedNode = source;
+                    FocusChangeListener l = sFocusListener;
+                    if (l != null) l.onFocusChanged(true);
                 } else {
                     release(source);
                 }
@@ -131,6 +143,8 @@ public class FloatingDictationAccessibilityService extends AccessibilityService 
         if (mLastFocusedNode != null) {
             release(mLastFocusedNode);
             mLastFocusedNode = null;
+            FocusChangeListener l = sFocusListener;
+            if (l != null) l.onFocusChanged(false);
         }
     }
 

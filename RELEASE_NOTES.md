@@ -1,3 +1,19 @@
+# Aura Transcribe v0.3.1 — Lateral Pill Docking and Smart Keyboard Avoidance
+
+`versionCode 43` (`v0.3.1`) — Release update introducing lateral edge pill docking for the floating overlay and intelligent virtual keyboard avoidance across all Android applications.
+
+Aura Transcribe 0.3.1 introduces lateral edge docking for the floating overlay and intelligent virtual keyboard avoidance across all Android applications.
+
+### Lateral Edge Docking
+The floating bubble now docks seamlessly into the nearest screen bezel when released. Upon snapping, the bubble embeds against the display boundary leaving one-third of its surface visible as a tactile pill. Rounded interior corners and a flat exterior bezel edge preserve screen real estate while remaining readily accessible. Tapping the docked pill expands the dictation interface and starts recording in a single motion, enabling instantaneous voice capture. Dragging the pill immediately restores the full circular bubble with natural physics.
+
+### Intelligent Keyboard Avoidance
+The overlay dynamically responds to on-screen keyboard (IME) visibility. When the virtual keyboard opens in any foreground application, the floating pill or bubble smoothly translates vertically above the keyboard boundary to prevent visual obstruction. When the keyboard is dismissed, the overlay gracefully returns to its user-defined vertical position. Furthermore, when the dictation panel is expanded while a keyboard is active, oversized bottom controls collapse automatically to provide an unobstructed, compact transcription view.
+
+This update enhances multitasking productivity with fluid gestures, responsive window insets, and zero screen obstruction.
+
+---
+
 # Aura Transcribe v0.3.0-pre — Material 3 Expressive, Bubble Physics & Advanced Dictation
 
 `versionCode 42` (`v0.3.0-pre`) — Pre-release update introducing the Material 3 Expressive token system, refined floating overlay physics, and an updated real-time thought-dictation post-processing engine.
