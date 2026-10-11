@@ -128,7 +128,9 @@ public class FloatingOverlayService extends Service {
     private final Runnable mFadeStopFallback = this::stopSelf;
 
     private static final long INACTIVITY_DOCK_DELAY_MS = 2500L;
-    public static final float DOCKED_OFFSCREEN_RATIO = 2.0f / 3.0f;
+    public static final int DOCKED_VISIBLE_WIDTH_DP = 16;
+    public static final float DOCKED_OFFSCREEN_RATIO = 0.75f;
+    private static final float DOCKED_RESTING_ALPHA = 0.80f;
     private ValueAnimator mSnapAnimator;
     private ValueAnimator mDockAnimator;
     private ValueAnimator mYAnimator;
@@ -360,6 +362,14 @@ public class FloatingOverlayService extends Service {
         loadBubblePosition();
         mParams.x = mBubbleX;
         mParams.y = mBubbleY;
+        float startupDensity = getResources().getDisplayMetrics().density;
+        int startupBubbleSize = (int) (64 * startupDensity);
+        int startupScreenWidth = getRealScreenWidth();
+        if (mBubbleX < 0) {
+            applyDockedAppearance(true);
+        } else if (mBubbleX > startupScreenWidth - startupBubbleSize) {
+            applyDockedAppearance(false);
+        }
 
         setupGestureAndListeners();
         mWindowManager.addView(mOverlayView, mParams);
@@ -436,6 +446,9 @@ public class FloatingOverlayService extends Service {
                         initialTouchY = event.getRawY();
                         isClick = true;
                         mHasStartedDrag = false;
+                        if (mBubbleRoot != null) {
+                            mBubbleRoot.setAlpha(1.0f);
+                        }
                         return true;
                     case MotionEvent.ACTION_MOVE:
                         int dx = (int) (event.getRawX() - initialTouchX);
@@ -810,9 +823,10 @@ public class FloatingOverlayService extends Service {
             int y = Integer.parseInt(saved.substring(comma + 1).trim());
             float density = getResources().getDisplayMetrics().density;
             int bubbleSize = (int) (64 * density);
-            int maxX = Math.max(0, getRealScreenWidth() - bubbleSize);
+            int minX = -bubbleSize;
+            int maxX = getRealScreenWidth();
             int maxY = Math.max(0, getRealScreenHeight() - bubbleSize);
-            mBubbleX = Math.max(0, Math.min(x, maxX));
+            mBubbleX = Math.max(minX, Math.min(x, maxX));
             mBubbleY = Math.max(0, Math.min(y, maxY));
         } catch (NumberFormatException e) {
             Log.w(TAG, "Invalid saved bubble position", e);
@@ -1156,6 +1170,9 @@ public class FloatingOverlayService extends Service {
         mParams.x = currentX;
         mParams.y = currentY;
         mIsDocked = wasDocked;
+        if (wasDocked) {
+            applyDockedAppearance(mIsDockedLeft);
+        }
 
         setupGestureAndListeners();
 
@@ -1261,6 +1278,11 @@ public class FloatingOverlayService extends Service {
         return isLeft ? -peekOffset : (screenWidth - bubbleWidth + peekOffset);
     }
 
+    static int calculateDockedX(boolean isLeft, int bubbleWidth, int screenWidth, int visibleWidth) {
+        int offscreen = Math.max(0, bubbleWidth - visibleWidth);
+        return isLeft ? -offscreen : (screenWidth - visibleWidth);
+    }
+
     static int calculateImeAvoidanceY(int currentY, int bubbleHeight, int screenHeight, int statusBarHeight, int imeHeight, int margin) {
         if (imeHeight <= 0) {
             return currentY;
@@ -1283,15 +1305,15 @@ public class FloatingOverlayService extends Service {
             mBubbleCircle.setTranslationX(isLeft ? (6f * density) : (-6f * density));
         }
         if (mBubbleIcon != null) {
-            mBubbleIcon.setTranslationX(isLeft ? (21.5f * density) : (-21.5f * density));
-            mBubbleIcon.setScaleX(0.75f);
-            mBubbleIcon.setScaleY(0.75f);
+            mBubbleIcon.setTranslationX(isLeft ? (24f * density) : (-24f * density));
+            mBubbleIcon.setScaleX(0.45f);
+            mBubbleIcon.setScaleY(0.45f);
         }
         if (mBubbleMicLevel != null) {
             mBubbleMicLevel.setVisibility(View.INVISIBLE);
         }
         if (mBubbleRoot != null) {
-            mBubbleRoot.setAlpha(1.0f);
+            mBubbleRoot.setAlpha(DOCKED_RESTING_ALPHA);
         }
     }
 
@@ -1445,7 +1467,8 @@ public class FloatingOverlayService extends Service {
         int startX = mParams.x;
         int nearestEdgeX = calculateNearestEdgeX(startX, bubbleWidth, screenWidth);
         boolean isLeft = (nearestEdgeX == 0);
-        int targetX = calculateDockedX(isLeft, bubbleWidth, screenWidth, DOCKED_OFFSCREEN_RATIO);
+        int visibleWidth = (int) (DOCKED_VISIBLE_WIDTH_DP * density);
+        int targetX = calculateDockedX(isLeft, bubbleWidth, screenWidth, visibleWidth);
 
         int startY = mParams.y;
         int targetY = clampY(startY, bubbleHeight, screenHeight, statusBar);

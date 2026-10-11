@@ -56,7 +56,7 @@
                 android:layout_gravity="center"
                 android:src="@drawable/ic_mic"
                 android:contentDescription="@string/section_ime"
-                app:tint="?attr/colorOnPrimaryContainer" />
+                app:tint="?attr/colorOnPrimary" />
         </FrameLayout>
 
         <TextView

@@ -139,18 +139,33 @@ public class FloatingOverlayTest {
     }
 
     @Test
-    public void testCalculateDockedXOneThirdVisible() {
+    public void testCalculateDockedXHandle() {
         int screenWidth = 1080;
-        int bubbleWidth = 120;
-        float offscreenRatio = FloatingOverlayService.DOCKED_OFFSCREEN_RATIO; // 2.0f / 3.0f
+        int bubbleWidth = 128;
+        float offscreenRatio = FloatingOverlayService.DOCKED_OFFSCREEN_RATIO; // 0.75f
 
-        // Left edge: -80, so 120 - 80 = 40 (1/3 of 120) remains visible
+        // Left edge: -(128 * 0.75) = -96, leaving 32 visible
         int leftDocked = FloatingOverlayService.calculateDockedX(true, bubbleWidth, screenWidth, offscreenRatio);
-        assertEquals(-80, leftDocked);
+        assertEquals(-96, leftDocked);
 
-        // Right edge: 1080 - 120 + 80 = 1040, so 1080 - 1040 = 40 (1/3 of 120) remains visible
+        // Right edge: 1080 - 128 + 96 = 1048, leaving 32 visible
         int rightDocked = FloatingOverlayService.calculateDockedX(false, bubbleWidth, screenWidth, offscreenRatio);
-        assertEquals(1040, rightDocked);
+        assertEquals(1048, rightDocked);
+    }
+
+    @Test
+    public void testCalculateDockedXVisibleWidth() {
+        int screenWidth = 1080;
+        int bubbleWidth = 128;
+        int visibleWidth = 32;
+
+        int leftDocked = FloatingOverlayService.calculateDockedX(true, bubbleWidth, screenWidth, visibleWidth);
+        assertEquals(-96, leftDocked);
+        assertEquals(visibleWidth, bubbleWidth + leftDocked);
+
+        int rightDocked = FloatingOverlayService.calculateDockedX(false, bubbleWidth, screenWidth, visibleWidth);
+        assertEquals(1048, rightDocked);
+        assertEquals(visibleWidth, screenWidth - rightDocked);
     }
 
     @Test
