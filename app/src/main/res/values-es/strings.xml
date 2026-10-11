@@ -245,7 +245,7 @@
     <string name="floating_status_ready">Listo</string>
     <string name="floating_action_cancel">Cancelar</string>
     <string name="floating_action_insert">Insertar</string>
-    <string name="floating_ai_fix_toggle">Corrección IA</string>
+    <string name="floating_ai_fix_toggle">AI Fix</string>
     <string name="floating_overlay_permission_title">Permiso de superposición requerido</string>
     <string name="floating_overlay_permission_msg">Concede el permiso de Mostrar sobre otras aplicaciones para usar la burbuja flotante de dictado.</string>
     <string name="floating_service_name">Superposición de dictado flotante</string>

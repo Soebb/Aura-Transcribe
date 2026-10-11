@@ -101,22 +101,25 @@
                 style="?attr/borderlessButtonStyle"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
+                android:minWidth="0dp"
+                android:minHeight="0dp"
                 android:paddingStart="8dp"
                 android:paddingEnd="8dp"
+                android:paddingTop="6dp"
+                android:paddingBottom="6dp"
                 android:text="@string/floating_action_cancel"
                 android:textColor="?attr/colorError"
                 android:visibility="gone" />
 
-            <!-- 48dp touch target for a 24dp glyph (12dp padding), instead of
-                 the previous 28dp box that was both an undersized target and a
-                 cramped icon. -->
+            <!-- Close icon button with compact touch box -->
             <ImageView
                 android:id="@+id/floating_close_button"
-                android:layout_width="@dimen/min_touch_target"
-                android:layout_height="@dimen/min_touch_target"
+                android:layout_width="36dp"
+                android:layout_height="36dp"
+                android:layout_marginStart="4dp"
                 android:background="?attr/selectableItemBackgroundBorderless"
                 android:contentDescription="@string/action_close"
-                android:padding="12dp"
+                android:padding="6dp"
                 android:src="@drawable/ic_close"
                 app:tint="?attr/colorOnSurfaceVariant" />
         </LinearLayout>
@@ -129,6 +132,7 @@
             android:layout_height="64dp"
             android:layout_marginTop="8dp"
             android:background="@drawable/bg_result"
+            android:fillViewport="true"
             android:overScrollMode="never"
             android:scrollbars="none"
             android:visibility="gone">

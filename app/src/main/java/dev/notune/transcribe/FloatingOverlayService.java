@@ -388,16 +388,6 @@ public class FloatingOverlayService extends Service {
                 return insets;
             });
         }
-        mOverlayView.getViewTreeObserver().addOnGlobalLayoutListener(() -> {
-            if (mIsDestroyed || mWindowManager == null) return;
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                try {
-                    WindowMetrics metrics = mWindowManager.getCurrentWindowMetrics();
-                    int imeHeight = metrics.getWindowInsets().getInsets(WindowInsets.Type.ime()).bottom;
-                    handleImeVisibility(imeHeight);
-                } catch (Throwable ignored) {}
-            }
-        });
         FloatingDictationAccessibilityService.setFocusListener(isEditableFocused -> {
             if (mMainHandler != null) {
                 mMainHandler.post(() -> {
@@ -1416,21 +1406,16 @@ public class FloatingOverlayService extends Service {
 
     private void handleImeVisibility(int imeHeight) {
         if (mIsDestroyed || mWindowManager == null || mOverlayView == null || mParams == null) return;
-        if (mLastImeHeight == imeHeight) return;
+        if (Math.abs(mLastImeHeight - imeHeight) < 15 && (imeHeight == 0 || mLastImeHeight > 0)) return;
         mLastImeHeight = imeHeight;
 
         boolean isPanelOpen = (mPanelRoot != null && mPanelRoot.getVisibility() == View.VISIBLE);
         if (isPanelOpen) {
-            if (imeHeight > 0) {
-                if (mRecordContainer != null) {
-                    mRecordContainer.setVisibility(View.GONE);
-                }
-            } else {
-                if (mRecordContainer != null) {
-                    mRecordContainer.setVisibility(View.VISIBLE);
-                }
+            int targetVisibility = imeHeight > 0 ? View.GONE : View.VISIBLE;
+            if (mRecordContainer != null && mRecordContainer.getVisibility() != targetVisibility) {
+                mRecordContainer.setVisibility(targetVisibility);
+                resizeWindow(true);
             }
-            resizeWindow(true);
             return;
         }
 
