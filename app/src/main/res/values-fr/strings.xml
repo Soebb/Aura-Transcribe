@@ -245,7 +245,7 @@
     <string name="floating_status_ready">Prêt</string>
     <string name="floating_action_cancel">Annuler</string>
     <string name="floating_action_insert">Insérer</string>
-    <string name="floating_ai_fix_toggle">Correction IA</string>
+    <string name="floating_ai_fix_toggle">AI Fix</string>
     <string name="floating_overlay_permission_title">Autorisation de superposition requise</string>
     <string name="floating_overlay_permission_msg">Veuillez accorder l\'autorisation Afficher par-dessus d\'autres applications pour utiliser la bulle flottante de dictée.</string>
     <string name="floating_service_name">Superposition de dictée flottante</string>

@@ -57,7 +57,8 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:gravity="center_vertical"
-            android:orientation="horizontal">
+            android:orientation="horizontal"
+            android:paddingBottom="8dp">
 
             <TextView
                 android:id="@+id/floating_status_text"
@@ -124,14 +125,15 @@
                 app:tint="?attr/colorOnSurfaceVariant" />
         </LinearLayout>
 
-        <!-- Live partial hypothesis text: appears while recording, card-backed
-             so the transcription window reads as a proper text pad -->
+        <!-- Live streaming partial transcription (Nemotron etc.): a two-line
+             window matching IME layout with auto-scroll pinning to newest words. -->
         <ScrollView
             android:id="@+id/floating_partial_scroll"
             android:layout_width="match_parent"
-            android:layout_height="64dp"
-            android:layout_marginTop="8dp"
+            android:layout_height="56dp"
+            android:layout_marginBottom="4dp"
             android:background="@drawable/bg_result"
+            android:padding="8dp"
             android:fillViewport="true"
             android:overScrollMode="never"
             android:scrollbars="none"
@@ -141,43 +143,41 @@
                 android:id="@+id/floating_partial_text"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:minLines="2"
-                android:padding="8dp"
+                android:paddingStart="4dp"
+                android:paddingEnd="4dp"
                 android:textAppearance="?attr/textAppearanceBodyLarge"
                 android:textColor="?attr/colorOnSurface" />
         </ScrollView>
 
         <!-- Record area: pulsing mic glow behind a circular record button,
-             with a tap hint like the IME voice panel -->
+             matching the 132dp IME proportions and tap target -->
         <FrameLayout
             android:id="@+id/floating_record_container"
             android:layout_width="match_parent"
-            android:layout_height="150dp"
-            android:layout_marginTop="8dp"
+            android:layout_height="132dp"
             android:clickable="true"
             android:focusable="true">
 
             <dev.notune.transcribe.MicLevelView
                 android:id="@+id/floating_mic_level"
-                android:layout_width="120dp"
-                android:layout_height="120dp"
+                android:layout_width="132dp"
+                android:layout_height="132dp"
                 android:layout_gravity="center" />
 
             <View
                 android:id="@+id/floating_record_circle"
-                android:layout_width="76dp"
-                android:layout_height="76dp"
+                android:layout_width="84dp"
+                android:layout_height="84dp"
                 android:layout_gravity="center"
-                android:background="@drawable/bg_record_circle" />
+                android:background="@drawable/bg_ime_record" />
 
             <ImageView
                 android:id="@+id/floating_mic_icon"
-                android:layout_width="34dp"
-                android:layout_height="34dp"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
                 android:layout_gravity="center"
-                android:contentDescription="@string/section_ime"
-                android:src="@drawable/ic_mic"
-                app:tint="?attr/colorOnPrimary" />
+                android:importantForAccessibility="no"
+                android:src="@drawable/ic_mic" />
 
             <TextView
                 android:id="@+id/floating_hint"
@@ -185,6 +185,7 @@
                 android:layout_height="wrap_content"
                 android:layout_gravity="center_horizontal|bottom"
                 android:layout_marginBottom="8dp"
+                android:accessibilityLiveRegion="polite"
                 android:text="@string/ime_tap_to_record"
                 android:textAppearance="?attr/textAppearanceBodySmall"
                 android:textColor="?attr/colorOnSurfaceVariant" />

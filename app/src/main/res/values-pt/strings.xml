@@ -245,7 +245,7 @@
     <string name="floating_status_ready">Pronto</string>
     <string name="floating_action_cancel">Cancelar</string>
     <string name="floating_action_insert">Inserir</string>
-    <string name="floating_ai_fix_toggle">Correção IA</string>
+    <string name="floating_ai_fix_toggle">AI Fix</string>
     <string name="floating_overlay_permission_title">Permissão de sobreposição necessária</string>
     <string name="floating_overlay_permission_msg">Conceda a permissão Sobrepor a outros aplicativos para usar a bolha flutuante de ditado.</string>
     <string name="floating_service_name">Sobreposição de ditado flutuante</string>

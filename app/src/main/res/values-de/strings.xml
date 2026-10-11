@@ -245,7 +245,7 @@
     <string name="floating_status_ready">Bereit</string>
     <string name="floating_action_cancel">Abbrechen</string>
     <string name="floating_action_insert">Einfügen</string>
-    <string name="floating_ai_fix_toggle">KI-Korrektur</string>
+    <string name="floating_ai_fix_toggle">AI Fix</string>
     <string name="floating_overlay_permission_title">Überlagerungsberechtigung erforderlich</string>
     <string name="floating_overlay_permission_msg">Bitte erteilen Sie die Berechtigung Über anderen Apps anzeigen, um die schwebende Diktierblase zu verwenden.</string>
     <string name="floating_service_name">Schwebendes Diktat-Overlay</string>

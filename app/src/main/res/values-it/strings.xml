@@ -245,7 +245,7 @@
     <string name="floating_status_ready">Pronto</string>
     <string name="floating_action_cancel">Annulla</string>
     <string name="floating_action_insert">Inserisci</string>
-    <string name="floating_ai_fix_toggle">Correzione IA</string>
+    <string name="floating_ai_fix_toggle">AI Fix</string>
     <string name="floating_overlay_permission_title">Autorizzazione sovrapposizione richiesta</string>
     <string name="floating_overlay_permission_msg">Concedi l\'autorizzazione per la visualizzazione sopra altre app per usare la bolla fluttuante di dettatura.</string>
     <string name="floating_service_name">Sovrapposizione di dettatura mobile</string>

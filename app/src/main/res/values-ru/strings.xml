@@ -245,7 +245,7 @@
     <string name="floating_status_ready">Готово</string>
     <string name="floating_action_cancel">Отмена</string>
     <string name="floating_action_insert">Вставить</string>
-    <string name="floating_ai_fix_toggle">ИИ-исправление</string>
+    <string name="floating_ai_fix_toggle">AI Fix</string>
     <string name="floating_overlay_permission_title">Требуется разрешение на наложение</string>
     <string name="floating_overlay_permission_msg">Предоставьте разрешение на отображение поверх других приложений для использования плавающего пузыря диктовки.</string>
     <string name="floating_service_name">Плавающий оверлей диктовки</string>
