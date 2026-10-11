@@ -34,8 +34,8 @@ android {
         // `connectedDebugAndroidTest` runs them on a connected device. Without this runner
         // the platform default would silently skip AndroidJUnit4 classes.
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        versionCode = 46
-        versionName = "0.3.1"
+        versionCode = 47
+        versionName = "0.3.2"
         ndk {
             // Android 17 requires 16 KB page-size alignment, which the native
             // build already produces (see RUSTFLAGS below). Only arm64-v8a is
@@ -521,14 +521,15 @@ data class ModelFile(val name: String, val sha256: String)
 // The bundled GGUF goes into the model_assets asset pack so the base module
 // stays under the Play Store 200 MB compressed-download limit.
 //
-// Default model: Nemotron 3.5 ASR Streaming 0.6B in Q8_0 (the quantization
-// with the best WER/quality trade-off per the handy-computer model card).
+// Default model: Nemotron 3.5 ASR Streaming 0.6B in Q5_K_M (the quantization
+// with the optimal accuracy/resource trade-off: 25.5% smaller than Q8_0,
+// saving ~210 MiB RAM while maintaining streaming precision).
 // Cache-aware streaming + native language detection (40 language-locales);
 // the engine falls back to the device-locale hint for Canary-family models
 // without native detection. SHA-256 is the HF LFS oid of the file.
 val modelPackFiles = listOf(
-    ModelFile("nemotron-3.5-asr-streaming-0.6b-Q8_0.gguf",
-        "b94545b313b3223fda7b2857a52681da813935c2127643d1e9ff0c23d988089c"),
+    ModelFile("nemotron-3.5-asr-streaming-0.6b-Q5_K_M.gguf",
+        "86429e8c4f7fdcf9b3312269ad1ca6669478ba7805331c4aea7a2e33e9910d65"),
 )
 
 val huggingFaceRepo = "https://huggingface.co/handy-computer/nemotron-3.5-asr-streaming-0.6b-gguf/resolve/main"

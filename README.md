@@ -12,7 +12,7 @@ The application functions across multiple Android integration points, providing 
 
 ## Key Features
 
-- **On-Device Speech Recognition:** Transcription runs 100% locally using a quantized [Nemotron 3.5 ASR Streaming 0.6B](https://huggingface.co/nvidia/nemotron-3.5-asr-streaming-0.6b) model (Q8_0 GGUF, licensed under OpenMDW-1.1). Audio recordings never leave your device.
+- **On-Device Speech Recognition:** Transcription runs 100% locally using a quantized [Nemotron 3.5 ASR Streaming 0.6B](https://huggingface.co/nvidia/nemotron-3.5-asr-streaming-0.6b) model (Q5_K_M GGUF, licensed under OpenMDW-1.1). Audio recordings never leave your device.
 - **System-Wide Voice Typing:** Responds to Android's `RecognizerIntent.ACTION_RECOGNIZE_SPEECH` to supply a bottom-sheet dictation panel in compatible keyboards (such as Microsoft SwiftKey) and browser voice fields.
 - **Dedicated Input Method Editor (IME):** Includes a standalone voice keyboard for one-tap dictation across apps using standard input method switching.
 - **Voice Recognition Service:** Implements the system `SpeechRecognizer` service API for third-party keyboard and app integrations.
@@ -271,6 +271,6 @@ Subsequent additions and architectural changes in this fork—including multi-de
 
 ### Third-Party Credits & Component Licenses
 
-- **Speech Model Weights & Architecture:** [Nemotron 3.5 ASR Streaming 0.6B](https://huggingface.co/nvidia/nemotron-3.5-asr-streaming-0.6b) by NVIDIA Corporation, quantized to GGUF (Q8_0) by [handy-computer](https://huggingface.co/handy-computer/nemotron-3.5-asr-streaming-0.6b-gguf). The model weights and architecture artifacts are licensed under the **OpenMDW License Agreement, version 1.1 (OpenMDW-1.1)**; see [MODEL_LICENSE.md](MODEL_LICENSE.md) for the full text, notices of origin, and redistribution conditions.
+- **Speech Model Weights & Architecture:** [Nemotron 3.5 ASR Streaming 0.6B](https://huggingface.co/nvidia/nemotron-3.5-asr-streaming-0.6b) by NVIDIA Corporation, quantized to GGUF (Q5_K_M) by [handy-computer](https://huggingface.co/handy-computer/nemotron-3.5-asr-streaming-0.6b-gguf). The model weights and architecture artifacts are licensed under the **OpenMDW License Agreement, version 1.1 (OpenMDW-1.1)**; see [MODEL_LICENSE.md](MODEL_LICENSE.md) for the full text, notices of origin, and redistribution conditions.
 - **Inference Kernels:** [transcribe.cpp](https://github.com/handy-computer/transcribe.cpp) and [ggml](https://github.com/ggerganov/ggml) by CJ Pais, Georgi Gerganov, and contributors (MIT / Apache-2.0 licenses).
 - **Audio Capture:** [cpal](https://github.com/RustAudio/cpal) (Cross-Platform Audio Library; Apache-2.0 license).

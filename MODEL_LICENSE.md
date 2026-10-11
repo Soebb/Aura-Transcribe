@@ -2,7 +2,7 @@
 
 This document provides the license terms and notices of origin for the bundled speech recognition model artifact:
 
-**Artifact:** `nemotron-3.5-asr-streaming-0.6b-Q8_0.gguf`  
+**Artifact:** `nemotron-3.5-asr-streaming-0.6b-Q5_K_M.gguf`  
 **Base Model:** [nvidia/nemotron-3.5-asr-streaming-0.6b](https://huggingface.co/nvidia/nemotron-3.5-asr-streaming-0.6b) by NVIDIA Corporation  
 **Quantized GGUF Distribution:** [handy-computer/nemotron-3.5-asr-streaming-0.6b-gguf](https://huggingface.co/handy-computer/nemotron-3.5-asr-streaming-0.6b-gguf) by handy-computer  
 **Model License:** OpenMDW License Agreement, version 1.1 (OpenMDW-1.1)  

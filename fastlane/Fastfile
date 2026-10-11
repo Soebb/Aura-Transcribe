@@ -257,7 +257,7 @@ platform :android do
         and transcription keyboard and dictation tool for Android.
         
         Features:
-        * On-Device Neural ASR (Nemotron 3.5 Streaming, Q8_0 GGUF)
+        * On-Device Neural ASR (Nemotron 3.5 Streaming, Q5_K_M GGUF)
         * Low latency streaming transcription with real-time preview
         * Native Bluetooth headset and AudioRecord bridge support
         * System-wide IME Keyboard and Floating Dictation Overlay

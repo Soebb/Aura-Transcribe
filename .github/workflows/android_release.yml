@@ -402,6 +402,7 @@ jobs:
         name: Aura Transcribe v${{ env.VERSION_NAME }}
         tag_name: v${{ env.VERSION_NAME }}
         body_path: RELEASE_NOTES.md
+        prerelease: true
         files: |
           Aura_Transcribe_v${{ env.VERSION_NAME }}.apk
           Aura_Transcribe_v${{ env.VERSION_NAME }}.aab

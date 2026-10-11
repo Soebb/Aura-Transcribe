@@ -20,7 +20,7 @@ public final class ModelImportHelper {
 
     /**
      * Maximum allowed model size: 4 GiB.
-     * Accommodates supported speech recognition models (e.g. Nemotron 0.6B Q8_0 at ~751 MB,
+     * Accommodates supported speech recognition models (e.g. Nemotron 0.6B Q5_K_M at ~560 MB,
      * large Whisper and Parakeet GGUF models up to ~3.5 GiB) while preventing unbounded disk
      * consumption from rogue or infinite input streams.
      */

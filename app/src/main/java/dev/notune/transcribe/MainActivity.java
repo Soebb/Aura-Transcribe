@@ -130,9 +130,9 @@ public class MainActivity extends AppCompatActivity {
      * build's {@code checkModels} gate enforces for the bundled asset).
      */
     private static final String DEBUG_MODEL_NAME =
-            "nemotron-3.5-asr-streaming-0.6b-Q8_0.gguf";
+            "nemotron-3.5-asr-streaming-0.6b-Q5_K_M.gguf";
     private static final String DEBUG_MODEL_SHA256 =
-            "b94545b313b3223fda7b2857a52681da813935c2127643d1e9ff0c23d988089c";
+            "86429e8c4f7fdcf9b3312269ad1ca6669478ba7805331c4aea7a2e33e9910d65";
 
     // Debug builds download the model on first run. Guard against multiple
     // concurrent downloads (e.g. after a configuration change the Activity is

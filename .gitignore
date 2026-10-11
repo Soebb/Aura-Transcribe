@@ -60,3 +60,8 @@ benchmark_results.json
 *.lock
 !Cargo.lock
 !crates/**/Cargo.lock
+
+# Benchmark fixtures and run outputs
+benchmark/models/
+benchmark/corpus/audio/
+benchmark/results/

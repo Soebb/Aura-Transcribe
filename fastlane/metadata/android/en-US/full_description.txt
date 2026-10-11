@@ -1,6 +1,6 @@
 Aura Transcribe turns your speech into text on your own device.
 
-Speech recognition runs entirely on your phone, using the bundled Nemotron 3.5 ASR Streaming 0.6B model (Q8_0 GGUF) on the CPU (ARM NEON with dotprod and fp16). No audio is uploaded, no account is needed, and the app works in airplane mode. There are no ads and no analytics SDKs.
+Speech recognition runs entirely on your phone, using the bundled Nemotron 3.5 ASR Streaming 0.6B model (Q5_K_M GGUF) on the CPU (ARM NEON with dotprod and fp16). No audio is uploaded, no account is needed, and the app works in airplane mode. There are no ads and no analytics SDKs.
 
 VOICE TYPING IN ANY APP
 Tap the microphone on a compatible keyboard, such as Microsoft SwiftKey, or a website's voice-search button, and Aura Transcribe transcribes your speech straight into the text field. It also registers as an Android speech-recognition service, so other keyboards and apps can select it as their dictation provider.

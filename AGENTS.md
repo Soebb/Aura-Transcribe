@@ -4,7 +4,7 @@
 
 > **Repo:** `Aura-Transcribe` (fork de `notune/android_transcribe_app`)
 > **Tipo:** App Android de transcripción de voz *offline* con opción de post-procesado con IA.
-> **Versión declarada actualmente en Gradle:** 0.3.1 (`versionCode 46`, ver `app/build.gradle.kts`). La versión realmente publicada debe comprobarse en tags/releases; no asumir que coincide con este fichero.
+> **Versión declarada actualmente en Gradle:** 0.3.2 (`versionCode 47`, ver `app/build.gradle.kts`). La versión realmente publicada debe comprobarse en tags/releases; no asumir que coincide con este fichero.
 >
 > **Idioma (decisión 2026-08-04):** los ficheros agénticos nuevos/actualizados
 > (`.ai_context/`, `agent_prompt.md`) se escriben en **inglés**; este `AGENTS.md`
