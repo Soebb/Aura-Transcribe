@@ -153,6 +153,7 @@ Post-procesado IA (fork addition): opcional, *off-line-by-default*, refina texto
 - 🤖 **Compilaciones de Depuración (Debug):** Se realizan SIEMPRE a través de GitHub Actions (`Build Debug APK` workflow), el cual recompila y envía automáticamente el archivo APK de depuración al usuario a través del bot de Telegram.
 - 🚀 **Compilaciones de Lanzamiento (Release):** Se realizan SIEMPRE a través de GitHub Actions (`Build Signed Release APK` workflow / `android_release.yml`) mediante tags `vX.Y.Z` o disparadores manuales.
 - 🛠️ **Disparador Manual Obligatorio (`workflow_dispatch`):** Todos los workflows de release (`android_release.yml`) deben mantener habilitado `workflow_dispatch` en su bloque `on:` y `tag_name: v${{ env.VERSION_NAME }}` en el paso de publicación. Esto garantiza resiliencia si GitHub Actions sufre un outage o pierde un evento de tag.
+- 📝 **Extensión y concisión del texto de Release (REGLA CLAVE):** El texto descriptivo de las releases (el contenido de `RELEASE_NOTES.md` que publica el CI en GitHub Releases) debe tener obligatoriamente una extensión de **máximo entre 125 y 250 palabras**. Debe ser técnico, conciso y orientado al impacto real (rendimiento, memoria, consumo, nuevas capacidades). `RELEASE_NOTES.md` contiene **únicamente la versión que se va a publicar**, evitando duplicar historiales antiguos (el historial histórico completo pertenece exclusivamente a `CHANGELOG.md`).
 
 ### Regla de validación por entorno (2026-08-06, actualizada 2026-10 — REGLA GRABADA A FUEGO)
 
@@ -421,7 +422,7 @@ No renombrar archivos Rust/Java sin actualizar la entrada JNI (§4.3).**Post-pro
 ### 4.11 Versión y release
 
 - **Bumps de versión:** editar `versionCode` **y** `versionName` en `app/build.gradle.kts`. `versionCode` siempre incremental.
-- **Notas de release:** añadir bloque nuevo a `RELEASE_NOTES.md` en la cabecera (no al final). El CI (`android_release.yml`) usa `body_path: RELEASE_NOTES.md` para `softprops/action-gh-release@v2`.
+- **Notas de release (REGLA CLAVE):** `RELEASE_NOTES.md` contiene **únicamente las notas de la versión actual a publicar**, con una longitud obligatoria de **máximo entre 125 y 250 palabras** (el CI usa `body_path: RELEASE_NOTES.md` para `softprops/action-gh-release@v2`). No acumular historiales de versiones pasadas en este archivo (el registro histórico completo vive en `CHANGELOG.md`).
 - **APK y AAB se publican los dos, pero en invocaciones separadas.** El workflow de release construye ambos (`assembleRelease` → `Aura_Transcribe_vX.Y.Z.apk`; `bundleRelease` → `Aura_Transcribe_vX.Y.Z.aab`) y crea un único GitHub Release con los dos ficheros. Lo que **no** puede hacerse es pedirlos en la misma llamada de Gradle: el APK necesita el GGUF en el módulo base y el AAB sólo en el asset pack `:model_assets` (`dynamicDelivery` install-time, ver `model_assets/build.gradle.kts`), así que `app/build.gradle.kts` hace fallback añadiendo `model_assets/src/main/assets/` a `assets.srcDirs` solo cuando NO es bundle, y una invocación ambigua falla al configurar. Ver "Entrega del modelo bundled" en §3.
 
 ---
@@ -605,7 +606,7 @@ ninguno de estos puntos como si funcionara, y no los "arregles" a medias.
 - Estilo observado en `git log`:
   - `feat: <qué>`, `fix: <qué>`, `chore: <qué>`, `ci: <qué>`, `docs: <qué>`, `refactor: <qué>`, `build: <qué>`.
   - Lenguaje de los mensajes: inglés, frases imperativas concisas, sin punto final.
-- Para cambios visibles al usuario que merezcan release, **primero el bloque en `RELEASE_NOTES.md`**, luego el commit, luego el tag `vX.Y.Z` (el CI dispara el build firmado y crea el GitHub Release con las notas).
+- Para cambios visibles al usuario que merezcan release, **primero redactar el bloque en `RELEASE_NOTES.md` respetando estrictamente el límite de 125–250 palabras**, luego el commit, luego el tag `vX.Y.Z` (el CI dispara el build firmado y crea el GitHub Release con las notas).
 
 ---
 
