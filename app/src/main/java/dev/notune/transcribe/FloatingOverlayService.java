@@ -128,7 +128,8 @@ public class FloatingOverlayService extends Service {
     private final Runnable mFadeStopFallback = this::stopSelf;
 
     private static final long INACTIVITY_DOCK_DELAY_MS = 2500L;
-    public static final int DOCKED_VISIBLE_WIDTH_DP = 16;
+    public static final int DOCKED_HANDLE_WIDTH_DP = 14;
+    public static final int DOCKED_VISIBLE_WIDTH_DP = 14;
     public static final float DOCKED_OFFSCREEN_RATIO = 0.75f;
     private static final float DOCKED_RESTING_ALPHA = 0.80f;
     private ValueAnimator mSnapAnimator;
@@ -363,11 +364,15 @@ public class FloatingOverlayService extends Service {
         mParams.x = mBubbleX;
         mParams.y = mBubbleY;
         float startupDensity = getResources().getDisplayMetrics().density;
-        int startupBubbleSize = (int) (64 * startupDensity);
+        int startupHandleWidth = (int) (DOCKED_HANDLE_WIDTH_DP * startupDensity);
         int startupScreenWidth = getRealScreenWidth();
-        if (mBubbleX < 0) {
+        if (mBubbleX <= 0) {
+            mParams.x = 0;
+            mBubbleX = 0;
             applyDockedAppearance(true);
-        } else if (mBubbleX > startupScreenWidth - startupBubbleSize) {
+        } else if (mBubbleX >= startupScreenWidth - startupHandleWidth - (int) (10 * startupDensity)) {
+            mParams.x = Math.max(0, startupScreenWidth - startupHandleWidth);
+            mBubbleX = mParams.x;
             applyDockedAppearance(false);
         }
 
@@ -458,6 +463,11 @@ public class FloatingOverlayService extends Service {
                             isClick = false;
                             mPreImeY = -1;
                             undockAndRestoreOpacity(false);
+                            if (mWasDockedOnDown) {
+                                float density = getResources().getDisplayMetrics().density;
+                                int fullWidth = (int) (64 * density);
+                                initialX = mIsDockedLeft ? 0 : Math.max(0, getRealScreenWidth() - fullWidth);
+                            }
                             showDismissTarget();
                             if (v != null) {
                                 try {
@@ -822,11 +832,11 @@ public class FloatingOverlayService extends Service {
             int x = Integer.parseInt(saved.substring(0, comma).trim());
             int y = Integer.parseInt(saved.substring(comma + 1).trim());
             float density = getResources().getDisplayMetrics().density;
-            int bubbleSize = (int) (64 * density);
-            int minX = -bubbleSize;
-            int maxX = getRealScreenWidth();
-            int maxY = Math.max(0, getRealScreenHeight() - bubbleSize);
-            mBubbleX = Math.max(minX, Math.min(x, maxX));
+            int handleWidth = (int) (DOCKED_HANDLE_WIDTH_DP * density);
+            int screenWidth = getRealScreenWidth();
+            int screenHeight = getRealScreenHeight();
+            int maxY = Math.max(0, screenHeight - (int) (52 * density));
+            mBubbleX = Math.max(0, Math.min(x, Math.max(0, screenWidth - handleWidth)));
             mBubbleY = Math.max(0, Math.min(y, maxY));
         } catch (NumberFormatException e) {
             Log.w(TAG, "Invalid saved bubble position", e);
@@ -1279,8 +1289,7 @@ public class FloatingOverlayService extends Service {
     }
 
     static int calculateDockedX(boolean isLeft, int bubbleWidth, int screenWidth, int visibleWidth) {
-        int offscreen = Math.max(0, bubbleWidth - visibleWidth);
-        return isLeft ? -offscreen : (screenWidth - visibleWidth);
+        return isLeft ? 0 : Math.max(0, screenWidth - visibleWidth);
     }
 
     static int calculateImeAvoidanceY(int currentY, int bubbleHeight, int screenHeight, int statusBarHeight, int imeHeight, int margin) {
@@ -1300,39 +1309,106 @@ public class FloatingOverlayService extends Service {
         mIsDocked = true;
         mIsDockedLeft = isLeft;
         float density = getResources().getDisplayMetrics().density;
+        int handleWidth = (int) (DOCKED_HANDLE_WIDTH_DP * density);
+        int handleHeight = (int) (52 * density);
+        int iconSize = (int) (10 * density);
+
+        if (mBubbleMicLevel != null) {
+            mBubbleMicLevel.setVisibility(View.GONE);
+        }
         if (mBubbleCircle != null) {
             mBubbleCircle.setBackgroundResource(isLeft ? R.drawable.bg_docked_pill_left : R.drawable.bg_docked_pill_right);
-            mBubbleCircle.setTranslationX(isLeft ? (6f * density) : (-6f * density));
+            mBubbleCircle.setTranslationX(0f);
+            mBubbleCircle.setScaleX(1f);
+            mBubbleCircle.setScaleY(1f);
+            FrameLayout.LayoutParams circleLp = (FrameLayout.LayoutParams) mBubbleCircle.getLayoutParams();
+            if (circleLp != null) {
+                circleLp.width = FrameLayout.LayoutParams.MATCH_PARENT;
+                circleLp.height = FrameLayout.LayoutParams.MATCH_PARENT;
+                circleLp.gravity = Gravity.CENTER;
+                mBubbleCircle.setLayoutParams(circleLp);
+            }
         }
         if (mBubbleIcon != null) {
-            mBubbleIcon.setTranslationX(isLeft ? (24f * density) : (-24f * density));
-            mBubbleIcon.setScaleX(0.45f);
-            mBubbleIcon.setScaleY(0.45f);
-        }
-        if (mBubbleMicLevel != null) {
-            mBubbleMicLevel.setVisibility(View.INVISIBLE);
+            mBubbleIcon.setTranslationX(0f);
+            mBubbleIcon.setScaleX(1f);
+            mBubbleIcon.setScaleY(1f);
+            FrameLayout.LayoutParams iconLp = (FrameLayout.LayoutParams) mBubbleIcon.getLayoutParams();
+            if (iconLp != null) {
+                iconLp.width = iconSize;
+                iconLp.height = iconSize;
+                iconLp.gravity = Gravity.CENTER;
+                mBubbleIcon.setLayoutParams(iconLp);
+            }
         }
         if (mBubbleRoot != null) {
+            ViewGroup.LayoutParams rootLp = mBubbleRoot.getLayoutParams();
+            if (rootLp != null) {
+                rootLp.width = handleWidth;
+                rootLp.height = handleHeight;
+                mBubbleRoot.setLayoutParams(rootLp);
+            }
             mBubbleRoot.setAlpha(DOCKED_RESTING_ALPHA);
+        }
+        if (mParams != null && mWindowManager != null && mOverlayView != null) {
+            mParams.width = WindowManager.LayoutParams.WRAP_CONTENT;
+            mParams.height = WindowManager.LayoutParams.WRAP_CONTENT;
+            try {
+                mWindowManager.updateViewLayout(mOverlayView, mParams);
+            } catch (Throwable ignored) {}
         }
     }
 
     private void applyUndockedAppearance() {
         mIsDocked = false;
-        if (mBubbleCircle != null) {
-            mBubbleCircle.setBackgroundResource(R.drawable.bg_record_circle);
-            mBubbleCircle.setTranslationX(0f);
-        }
-        if (mBubbleIcon != null) {
-            mBubbleIcon.setTranslationX(0f);
-            mBubbleIcon.setScaleX(1.0f);
-            mBubbleIcon.setScaleY(1.0f);
-        }
+        float density = getResources().getDisplayMetrics().density;
+        int normalRootSize = (int) (64 * density);
+        int normalCircleSize = (int) (52 * density);
+        int normalIconSize = (int) (26 * density);
+
         if (mBubbleMicLevel != null) {
             mBubbleMicLevel.setVisibility(View.VISIBLE);
         }
+        if (mBubbleCircle != null) {
+            mBubbleCircle.setBackgroundResource(R.drawable.bg_record_circle);
+            mBubbleCircle.setTranslationX(0f);
+            mBubbleCircle.setScaleX(1f);
+            mBubbleCircle.setScaleY(1f);
+            FrameLayout.LayoutParams circleLp = (FrameLayout.LayoutParams) mBubbleCircle.getLayoutParams();
+            if (circleLp != null) {
+                circleLp.width = normalCircleSize;
+                circleLp.height = normalCircleSize;
+                circleLp.gravity = Gravity.CENTER;
+                mBubbleCircle.setLayoutParams(circleLp);
+            }
+        }
+        if (mBubbleIcon != null) {
+            mBubbleIcon.setTranslationX(0f);
+            mBubbleIcon.setScaleX(1f);
+            mBubbleIcon.setScaleY(1f);
+            FrameLayout.LayoutParams iconLp = (FrameLayout.LayoutParams) mBubbleIcon.getLayoutParams();
+            if (iconLp != null) {
+                iconLp.width = normalIconSize;
+                iconLp.height = normalIconSize;
+                iconLp.gravity = Gravity.CENTER;
+                mBubbleIcon.setLayoutParams(iconLp);
+            }
+        }
         if (mBubbleRoot != null) {
+            ViewGroup.LayoutParams rootLp = mBubbleRoot.getLayoutParams();
+            if (rootLp != null) {
+                rootLp.width = normalRootSize;
+                rootLp.height = normalRootSize;
+                mBubbleRoot.setLayoutParams(rootLp);
+            }
             mBubbleRoot.setAlpha(1.0f);
+        }
+        if (mParams != null && mWindowManager != null && mOverlayView != null) {
+            mParams.width = WindowManager.LayoutParams.WRAP_CONTENT;
+            mParams.height = WindowManager.LayoutParams.WRAP_CONTENT;
+            try {
+                mWindowManager.updateViewLayout(mOverlayView, mParams);
+            } catch (Throwable ignored) {}
         }
     }
 
@@ -1467,8 +1543,8 @@ public class FloatingOverlayService extends Service {
         int startX = mParams.x;
         int nearestEdgeX = calculateNearestEdgeX(startX, bubbleWidth, screenWidth);
         boolean isLeft = (nearestEdgeX == 0);
-        int visibleWidth = (int) (DOCKED_VISIBLE_WIDTH_DP * density);
-        int targetX = calculateDockedX(isLeft, bubbleWidth, screenWidth, visibleWidth);
+        int handleWidth = (int) (DOCKED_HANDLE_WIDTH_DP * density);
+        int targetX = calculateDockedX(isLeft, bubbleWidth, screenWidth, handleWidth);
 
         int startY = mParams.y;
         int targetY = clampY(startY, bubbleHeight, screenHeight, statusBar);
@@ -1477,9 +1553,9 @@ public class FloatingOverlayService extends Service {
         mBubbleY = targetY;
 
         if (startX == targetX) {
+            applyDockedAppearance(isLeft);
             mParams.x = targetX;
             mBubbleX = targetX;
-            applyDockedAppearance(isLeft);
             saveBubblePosition();
             try {
                 mWindowManager.updateViewLayout(mOverlayView, mParams);

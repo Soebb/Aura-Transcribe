@@ -157,14 +157,15 @@ public class FloatingOverlayTest {
     public void testCalculateDockedXVisibleWidth() {
         int screenWidth = 1080;
         int bubbleWidth = 128;
-        int visibleWidth = 32;
+        int visibleWidth = 42; // e.g. 14dp @ 3x density
 
+        // Left edge: exactly 0, flush with bezel
         int leftDocked = FloatingOverlayService.calculateDockedX(true, bubbleWidth, screenWidth, visibleWidth);
-        assertEquals(-96, leftDocked);
-        assertEquals(visibleWidth, bubbleWidth + leftDocked);
+        assertEquals(0, leftDocked);
 
+        // Right edge: screenWidth - visibleWidth (1080 - 42 = 1038), flush with bezel
         int rightDocked = FloatingOverlayService.calculateDockedX(false, bubbleWidth, screenWidth, visibleWidth);
-        assertEquals(1048, rightDocked);
+        assertEquals(1038, rightDocked);
         assertEquals(visibleWidth, screenWidth - rightDocked);
     }
 
