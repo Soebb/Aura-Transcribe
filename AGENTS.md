@@ -2,9 +2,9 @@
 
 > Archivo de instrucciones para agentes IA que trabajen en este repositorio. Define stack, comandos, convenciones y reglas críticas que **no** deben romperse. Equivalente al `AGENTS.md` estándar (mismo rol que `CONTRIBUTING.md` tiene para humanos, pero dirigido a IAs).
 
-> **Repo:** `android_transcribe_app` (fork de `notune/android_transcribe_app`)
+> **Repo:** `Aura-Transcribe` (fork de `notune/android_transcribe_app`)
 > **Tipo:** App Android de transcripción de voz *offline* con opción de post-procesado con IA.
-> **Versión declarada actualmente en Gradle:** 0.2.2 (`versionCode 41`, ver `app/build.gradle.kts`). La versión realmente publicada debe comprobarse en tags/releases; no asumir que coincide con este fichero.
+> **Versión declarada actualmente en Gradle:** 0.3.1 (`versionCode 46`, ver `app/build.gradle.kts`). La versión realmente publicada debe comprobarse en tags/releases; no asumir que coincide con este fichero.
 >
 > **Idioma (decisión 2026-08-04):** los ficheros agénticos nuevos/actualizados
 > (`.ai_context/`, `agent_prompt.md`) se escriben en **inglés**; este `AGENTS.md`

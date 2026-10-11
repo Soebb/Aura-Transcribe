@@ -1,16 +1,17 @@
-# Aura Transcribe v0.3.1 — Lateral Pill Docking and Smart Keyboard Avoidance
+# Aura Transcribe v0.3.1 — Slender Docking, IME Avoidance & Unified Surfaces
 
-`versionCode 43` (`v0.3.1`) — Release update introducing lateral edge pill docking for the floating overlay and intelligent virtual keyboard avoidance across all Android applications.
+`versionCode 46` (`v0.3.1`) — Pre-release update introducing slender edge pill docking for the floating overlay, intelligent virtual keyboard avoidance, and unified layout proportions directly mirroring the on-screen voice keyboard.
 
-Aura Transcribe 0.3.1 introduces lateral edge docking for the floating overlay and intelligent virtual keyboard avoidance across all Android applications.
+Aura Transcribe 0.3.1 refines the floating dictation overlay and voice keyboard with unified layout proportions and real-time streaming speech visualization.
 
-### Lateral Edge Docking
-The floating bubble now docks seamlessly into the nearest screen bezel when released. Upon snapping, the bubble embeds against the display boundary leaving one-third of its surface visible as a tactile pill. Rounded interior corners and a flat exterior bezel edge preserve screen real estate while remaining readily accessible. Tapping the docked pill expands the dictation interface and starts recording in a single motion, enabling instantaneous voice capture. Dragging the pill immediately restores the full circular bubble with natural physics.
+### Unified Surface Proportions & Layout Alignment
+The floating dictation card adopts the exact 132dp layout scale, 84dp circular mic control, and status header spacing from the IME keyboard, eliminating vertical card inflation during speech input. The live hypothesis pad is constrained to a fixed two-line height (56dp) with automatic downward scroll, pinning the most recent completed line and active hypothesis tokens in real time.
+
+### Slender Edge Docking
+The floating bubble docks seamlessly into the nearest screen bezel when released. Upon snapping, the bubble embeds against the display boundary as a slender 14dp handle with subtle idle transparency. Rounded interior corners and a flat exterior bezel edge preserve screen real estate while remaining readily accessible. Tapping the docked handle expands the dictation interface and starts recording in a single motion.
 
 ### Intelligent Keyboard Avoidance
-The overlay dynamically responds to on-screen keyboard (IME) visibility. When the virtual keyboard opens in any foreground application, the floating pill or bubble smoothly translates vertically above the keyboard boundary to prevent visual obstruction. When the keyboard is dismissed, the overlay gracefully returns to its user-defined vertical position. Furthermore, when the dictation panel is expanded while a keyboard is active, oversized bottom controls collapse automatically to provide an unobstructed, compact transcription view.
-
-This update enhances multitasking productivity with fluid gestures, responsive window insets, and zero screen obstruction.
+The overlay dynamically responds to on-screen keyboard (IME) visibility without display jitter or layout recursion. When the virtual keyboard opens in any foreground application, the floating overlay smoothly translates vertically above the keyboard boundary to prevent visual obstruction. When dismissed, the overlay gracefully returns to its user-defined position.
 
 ---
 
