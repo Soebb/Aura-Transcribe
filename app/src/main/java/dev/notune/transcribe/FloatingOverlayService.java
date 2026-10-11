@@ -416,6 +416,7 @@ public class FloatingOverlayService extends Service {
             private float initialTouchX, initialTouchY;
             private boolean isClick = false;
             private boolean mHasStartedDrag = false;
+            private boolean mWasDockedOnDown = false;
 
             @Override
             public boolean onTouch(View v, MotionEvent event) {
