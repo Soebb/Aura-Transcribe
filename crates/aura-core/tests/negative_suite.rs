@@ -3,7 +3,7 @@ use aura_core::corrector::{correct, parse_dict};
 #[test]
 fn test_negative_sentences_zero_spurious_substitutions() {
     let dict_content = r#"
-# Nombres y términos técnicos
+# Names and technical terms
 Kubernetes
 PostgreSQL
 WebRTC

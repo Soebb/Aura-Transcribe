@@ -1669,7 +1669,7 @@ public class FloatingOverlayService extends Service {
         return null;
     }
 
-    // Native JNI methods
+    // Native JNI methods: bridge into the Rust cdylib (see AGENTS.md S4.3 naming)
     private native void initNative(FloatingOverlayService service);
     private native void cleanupNative();
     private native void startRecording(boolean autoStop, int sessionId);
@@ -1677,7 +1677,7 @@ public class FloatingOverlayService extends Service {
     private native void cancelRecording();
     private native void pushAudioDirect(java.nio.ByteBuffer buffer, int byteCount, int sessionId);
 
-    // Callbacks from Rust
+    // Callbacks from Rust via JNI: session-guarded, posted to the main thread
     public void onAutoStop(int sessionId) {
         if (sessionId != mCurrentSessionId) return;
         mMainHandler.post(() -> {

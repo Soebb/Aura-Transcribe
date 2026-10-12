@@ -340,7 +340,7 @@ final class CredentialMigration {
     }
 
     // ------------------------------------------------------------------
-    // Internals
+    // Internals: non-public migration steps, exercised via injected seams
     // ------------------------------------------------------------------
 
     private boolean anyLegacyCopyPresent() {

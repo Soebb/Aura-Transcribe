@@ -12,7 +12,7 @@ pub mod corrector;
 pub mod normalizer;
 pub mod phonetic;
 
-// Convenient re-exports
+// Convenient re-exports: single import path for downstream crates
 pub use bigram::{bigram_cosine, compute_bigrams, cosine_similarity_precomputed};
 pub use corrector::{
     apply_case, best_term, correct, is_word_char, parse_dict, tokenize, Dictionary, Segment, Term,
@@ -41,7 +41,7 @@ mod tests {
         let dict = parse_dict(raw_dict);
         assert_eq!(dict.len(), 5);
 
-        // Phonetic correction
+        // Phonetic correction: seseo-tolerant lookup must restore canonical casing
         let input = "ayer viaje a madriz y luego a barselona con wisper en new york";
         let corrected = correct(input, &dict);
         assert_eq!(
@@ -49,7 +49,7 @@ mod tests {
             "ayer viaje a Madrid y luego a Barcelona con Whisper en New York"
         );
 
-        // Normalizer prompt generation
+        // Normalizer prompt generation: control line and transcript must survive
         let prompt = build_s1_prompt(&corrected, "formal", None);
         assert!(prompt.contains("[Styling: formal]"));
         assert!(prompt.contains("Madrid"));

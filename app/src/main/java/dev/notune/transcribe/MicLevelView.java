@@ -85,7 +85,7 @@ public class MicLevelView extends View {
         float extra = min * 0.28f * current;
         float r = base + extra;
 
-        // Inner brighter ring
+        // Inner brighter ring: core level indicator, scales with mic amplitude
         int alphaInner = (int) (45 + 90 * current);  // 45..135
         paint.setColor(baseColor);
         paint.setAlpha(alphaInner);

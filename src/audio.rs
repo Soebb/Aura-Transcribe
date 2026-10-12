@@ -247,12 +247,12 @@ mod tests {
 
     #[test]
     fn test_pcm_i16_to_f32_neon_edge_cases_and_lengths() {
-        // Empty
+        // Empty input: nothing to convert, destination stays unchanged
         let mut dst = Vec::new();
         pcm_i16_to_f32_neon(&[], &mut dst);
         assert!(dst.is_empty());
 
-        // Extreme values
+        // Extreme values: full i16 range must map exactly into [-1.0, 1.0]
         let extremes = vec![i16::MIN, -16384, -1, 0, 1, 16384, 32767, -32768];
         let mut dst_extremes = Vec::new();
         pcm_i16_to_f32_neon(&extremes, &mut dst_extremes);

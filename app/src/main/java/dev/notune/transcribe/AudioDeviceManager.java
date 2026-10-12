@@ -38,7 +38,7 @@ public final class AudioDeviceManager {
     private static volatile boolean isPrewarmed = false;
 
     private AudioDeviceManager() {
-        // Utility class
+        // Utility class: static routing helpers only, never instantiated
     }
 
     /**

@@ -117,7 +117,7 @@ pub fn phonetic_key(input: &str) -> String {
             } // ñ → ny
             ('h', _, _) => {
                 i += 1;
-            } // silent h
+            } // silent h: Spanish h contributes no sound, so skip it
             _ => {
                 out.push(c);
                 i += 1;
@@ -180,7 +180,7 @@ mod tests {
         assert_eq!(phonetic_key("vaca"), phonetic_key("baca"));
         assert_eq!(phonetic_key("vino"), phonetic_key("bino"));
 
-        // silent h
+        // silent h: Spanish h is voiceless, so "hola" keys as "ola"
         assert_eq!(phonetic_key("hola"), phonetic_key("ola"));
         assert_eq!(phonetic_key("huevo"), "uebo");
 

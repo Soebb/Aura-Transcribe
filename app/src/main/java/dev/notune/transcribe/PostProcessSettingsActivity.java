@@ -149,7 +149,7 @@ public class PostProcessSettingsActivity extends AppCompatActivity {
         btnDownloadS1 = findViewById(R.id.btn_download_s1);
         progressS1 = findViewById(R.id.progress_s1);
 
-        // Provider dropdown
+        // Provider dropdown: maps display labels to stable provider ids
         String[] labels = new String[SettingsManager.PROVIDERS.length];
         for (int i = 0; i < SettingsManager.PROVIDERS.length; i++) {
             labels[i] = SettingsManager.PROVIDERS[i].label;
@@ -167,7 +167,7 @@ public class PostProcessSettingsActivity extends AppCompatActivity {
             updateProviderUi(p, true);
         });
 
-        // Preset dropdown
+        // Preset dropdown: maps localized labels to prompt preset keys
         String[] presetLabels = new String[PRESET_STRING_RES.length];
         for (int i = 0; i < PRESET_STRING_RES.length; i++) {
             presetLabels[i] = getString(PRESET_STRING_RES[i]);

@@ -82,7 +82,7 @@ pub fn parse_dict(raw: &str) -> Dictionary {
 /// Tries an exact case-insensitive match first, then a phonetic Levenshtein pass
 /// with an orthographic bigram cosine tiebreak.
 pub fn best_term(word_lower: &str, terms: &[Term]) -> Option<String> {
-    // Exact match
+    // Exact match first: a case-insensitive hit wins without phonetic work
     for t in terms {
         if t.lower == word_lower {
             return Some(t.text.clone());

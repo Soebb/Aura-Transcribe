@@ -309,7 +309,7 @@ public class MainActivity extends AppCompatActivity {
         // Handle notification actions after the views are ready.
         handleDownloadIntent(getIntent());
 
-        // Initial check
+        // Initial check: reflect engine/model state as soon as views are ready
         updateVoiceInputStatus();
         setupFloatingModeControls();
         setupMicModeControls();
@@ -819,7 +819,7 @@ public class MainActivity extends AppCompatActivity {
         throw new IOException(getString(R.string.bench_no_data_chunk, name));
     }
 
-    // Called from Rust
+    // Called from Rust via JNI with engine status; forwarded to the UI thread
     public void onStatusUpdate(String status) {
         runOnUiThread(() -> {
             statusText.setText(status);

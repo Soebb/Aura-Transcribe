@@ -40,7 +40,7 @@ pub unsafe extern "system" fn Java_dev_notune_transcribe_TranscribeFileActivity_
     };
     *STATE.lock().unwrap_or_else(|p| p.into_inner()) = Some(state);
 
-    // Load engine in background
+    // Load engine in background: decode setup must not wait for model I/O
     let vm_clone = vm_arc.clone();
     let target_ref_clone = target_ref.clone();
 

@@ -81,7 +81,7 @@ public class RecognizeActivity extends AppCompatActivity {
         // Tap anywhere (or on mic) to stop
         findViewById(R.id.root).setOnClickListener(v -> finishRecording());
 
-        // Permission check
+        // Permission check: refuse recording without runtime RECORD_AUDIO grant
         if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)
                 != PackageManager.PERMISSION_GRANTED) {
             status.setText(getString(R.string.rec_mic_permission_required));
@@ -323,7 +323,7 @@ public class RecognizeActivity extends AppCompatActivity {
         return new java.io.File(getFilesDir(), "auto_stop").exists();
     }
 
-    // Native methods
+    // Native methods: JNI bridge into the Rust voice session (see AGENTS.md S4.3)
     private native void initNative(RecognizeActivity activity);
     private native void cleanupNative();
     private native void startRecording(boolean autoStop, int sessionId);

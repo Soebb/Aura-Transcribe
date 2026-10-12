@@ -19,7 +19,7 @@ import java.security.NoSuchAlgorithmException;
 public final class FileSha256 {
 
     private FileSha256() {
-        // Utility class
+        // Utility class: static hash helpers only, never instantiated
     }
 
     /** Returns the lowercase hex SHA-256 of {@code file}. */

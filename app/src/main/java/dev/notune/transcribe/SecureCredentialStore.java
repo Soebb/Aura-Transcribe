@@ -225,7 +225,7 @@ final class SecureCredentialStore {
     }
 
     // ------------------------------------------------------------------
-    // Operations
+    // Operations: encrypted read/write/delete against the Keystore key
     // ------------------------------------------------------------------
 
     /** True when the secure store file exists (cheap; touches no Keystore). */

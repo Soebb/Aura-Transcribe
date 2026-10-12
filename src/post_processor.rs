@@ -126,7 +126,7 @@ pub fn normalize_text_on_device(
     let mut guard = S1_STATE.lock().unwrap_or_else(|p| p.into_inner());
     guard.touch();
 
-    // Check if model path exists
+    // Guard: refuse without a downloaded S1 model file on disk
     let _model_path = match &guard.model_path {
         Some(p) if p.exists() => p.clone(),
         _ => {
@@ -143,7 +143,7 @@ pub fn normalize_text_on_device(
 
     guard.is_loaded = true;
 
-    // Return cleaned text
+    // Placeholder path: return trimmed input until real inference lands
     let cleaned = raw_text.trim().to_string();
     Ok(cleaned)
 }

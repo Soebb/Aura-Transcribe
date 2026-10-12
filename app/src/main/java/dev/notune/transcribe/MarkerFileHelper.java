@@ -22,7 +22,7 @@ public final class MarkerFileHelper {
     private static final String TAG = "MarkerFileHelper";
 
     private MarkerFileHelper() {
-        // Utility class
+        // Utility class: static marker helpers only, never instantiated
     }
 
     /**

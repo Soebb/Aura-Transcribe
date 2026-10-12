@@ -95,7 +95,7 @@ pub fn init_session(env: JNIEnv, target: JObject) -> VoiceSessionState {
         stream_lock: Arc::new(Mutex::new(())),
     };
 
-    // Load engine in background
+    // Load engine in background: never block the caller on model I/O
     let vm_clone = vm_arc.clone();
     let target_ref_clone = target_ref.clone();
 

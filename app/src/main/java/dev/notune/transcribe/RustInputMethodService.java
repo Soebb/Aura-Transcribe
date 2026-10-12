@@ -83,7 +83,7 @@ public class RustInputMethodService extends InputMethodService {
     private volatile int currentSessionId = 0;
     private boolean pendingSwitchBack = false;
     private String lastStatus = "Initializing...";
-    // Key repeat settings
+    // Key repeat settings: long-press backspace/space timing constants
     private static final long REPEAT_INITIAL_DELAY = 400; // ms before repeat starts
     private static final long REPEAT_INTERVAL = 50; // ms between repeats
     private Runnable backspaceRepeatRunnable;
@@ -304,7 +304,7 @@ public class RustInputMethodService extends InputMethodService {
                 }
             };
 
-            // Key repeat runnable for space
+            // Key repeat runnable for space: reposts itself until key-up
             spaceRepeatRunnable = new Runnable() {
                 @Override
                 public void run() {
@@ -397,7 +397,7 @@ public class RustInputMethodService extends InputMethodService {
             recordContainer.setOnClickListener(v -> {
                 if (!recordContainer.isEnabled()) return;
 
-                // Check microphone permission
+                // Check microphone permission: refuse recording without runtime grant
                 if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)
                         != PackageManager.PERMISSION_GRANTED) {
                     if (statusView != null) statusView.setText(getString(R.string.ime_no_mic_permission));
@@ -630,7 +630,7 @@ public class RustInputMethodService extends InputMethodService {
         unregisterReceiver(cancelReceiver);
     }
 
-    // Native methods
+    // Native methods: JNI bridge into the Rust voice session (see AGENTS.md S4.3)
     private native void initNative(RustInputMethodService service);
     private native void cleanupNative();
     private native void startRecording(boolean autoStop, int sessionId);
@@ -655,7 +655,7 @@ public class RustInputMethodService extends InputMethodService {
         });
     }
 
-    // Called from Rust
+    // Called from Rust via JNI with session status; posted to the main thread
     public void onStatusUpdate(String status) {
         mainHandler.post(() -> {
             if (isDestroyed) return;
@@ -793,7 +793,7 @@ public class RustInputMethodService extends InputMethodService {
         if (cancelButton != null) cancelButton.setVisibility(View.GONE);
     }
 
-    // Called from Rust
+    // Called from Rust via JNI with the final transcript; stale sessions dropped
     public void onTextTranscribed(String text, int sessionId) {
         if (sessionId != currentSessionId) return;
         mainHandler.post(() -> {

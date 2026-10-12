@@ -518,7 +518,7 @@ public class SettingsManager implements PostProcessor.PostProcessorSettings {
     }
 
     // ----------------------------------------------------------------------
-    // Marker file helpers
+    // Marker file helpers: typed read/write over filesDir markers for Rust
     // ----------------------------------------------------------------------
 
     private String readMarker(String fileName) {

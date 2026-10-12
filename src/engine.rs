@@ -679,7 +679,7 @@ pub fn ensure_loaded_from_thread(
     let (lock, cvar) = &*LOAD_STATE;
     let mut state = lock.lock().unwrap_or_else(|p| p.into_inner());
 
-    // Re-check under lock
+    // Re-check under lock: another thread may have finished loading first
     if is_engine_loaded() {
         notify("Ready");
         return Ok(());

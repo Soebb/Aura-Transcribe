@@ -360,7 +360,7 @@ fn audio_callback(shared: &Arc<Endpoint>, data: &[f32]) {
         .extend_from_slice(data);
     shared.total_pushed.fetch_add(data.len(), Ordering::SeqCst);
 
-    // Vectorized RMS via SIMD/NEON
+    // Vectorized RMS via SIMD/NEON: keep the audio callback O(1)
     let rms = crate::audio::fast_rms(data);
     let level = (rms * 6.0).clamp(0.0, 1.0);
 

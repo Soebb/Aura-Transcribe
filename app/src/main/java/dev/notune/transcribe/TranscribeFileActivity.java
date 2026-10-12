@@ -386,7 +386,7 @@ public class TranscribeFileActivity extends AppCompatActivity {
                 extractor.setDataSource(this, uri, null);
             }
 
-            // Find audio track
+            // Find audio track: first audio/* track drives the decoder setup
             int audioTrackIndex = -1;
             MediaFormat inputFormat = null;
             for (int i = 0; i < extractor.getTrackCount(); i++) {
@@ -434,7 +434,7 @@ public class TranscribeFileActivity extends AppCompatActivity {
             while (!outputDone) {
                 if (cancelRequested.get()) throw new CancellationException();
 
-                // Feed input
+                // Feed input: queue compressed samples until extractor is exhausted
                 if (!inputDone) {
                     int inputBufferIndex = codec.dequeueInputBuffer(timeoutUs);
                     if (inputBufferIndex >= 0) {
@@ -453,7 +453,7 @@ public class TranscribeFileActivity extends AppCompatActivity {
                     }
                 }
 
-                // Drain output
+                // Drain output: collect decoded PCM until end-of-stream
                 int outputBufferIndex = codec.dequeueOutputBuffer(bufferInfo, timeoutUs);
 
                 if (outputBufferIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
@@ -500,7 +500,7 @@ public class TranscribeFileActivity extends AppCompatActivity {
                         if (channelCount == 1) {
                             chunk[filled++] = shortBuf.get() / 32768.0f;
                         } else {
-                            // Mix channels to mono
+                            // Mix channels to mono: engine accepts single-channel 16 kHz
                             float sum = 0f;
                             for (int c = 0; c < channelCount; c++) {
                                 sum += shortBuf.get() / 32768.0f;
@@ -668,7 +668,7 @@ public class TranscribeFileActivity extends AppCompatActivity {
         });
     }
 
-    // Native methods
+    // Native methods: JNI bridge into the Rust file-transcription worker
     private native void initNative(TranscribeFileActivity activity);
     private native void cleanupNative();
     private native void transcribeAudio(float[] samples, int length, int opId);

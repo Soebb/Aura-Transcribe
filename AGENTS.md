@@ -1,294 +1,297 @@
-# AGENTS.md — Guía para asistentes de IA
+# AGENTS.md — Guide for AI Assistants
 
-> Archivo de instrucciones para agentes IA que trabajen en este repositorio. Define stack, comandos, convenciones y reglas críticas que **no** deben romperse. Equivalente al `AGENTS.md` estándar (mismo rol que `CONTRIBUTING.md` tiene para humanos, pero dirigido a IAs).
+> Instruction file for AI agents working in this repository. It defines the stack, commands, conventions, and critical rules that must **never** be broken. Equivalent to the standard `AGENTS.md` (the same role `CONTRIBUTING.md` plays for humans, but aimed at AIs).
 
-> **Repo:** `Aura-Transcribe` (fork de `notune/android_transcribe_app`)
-> **Tipo:** App Android de transcripción de voz *offline* con opción de post-procesado con IA.
-> **Versión declarada actualmente en Gradle:** 0.3.2 (`versionCode 47`, ver `app/build.gradle.kts`). La versión realmente publicada debe comprobarse en tags/releases; no asumir que coincide con este fichero.
+> **Repo:** `Aura-Transcribe` (fork of `notune/android_transcribe_app`)
+> **Type:** Android app for *offline* voice transcription with optional AI post-processing.
+> **Currently declared Gradle version:** 0.3.2 (`versionCode 47`, see `app/build.gradle.kts`). The actually published version must be checked in tags/releases; do not assume it matches this file.
 >
-> **Idioma (decisión 2026-08-04):** los ficheros agénticos nuevos/actualizados
-> (`.ai_context/`, `agent_prompt.md`) se escriben en **inglés**; este `AGENTS.md`
-> conserva su idioma histórico. Cualquier sección nueva que añadas aquí puede
-> ir en inglés.
+> **Language (decision 2026-08-04, completed 2026-10-12):** all agentic files
+> (`.ai_context/`, `agent_prompt.md`, this `AGENTS.md`) are written in **English**.
+> Multilingual *product* support stays referenced throughout: the ES+EN phonetic
+> encoder (seseo/yeísmo, `ñ`→`ny`), the 7 locales, diacritics-aware language
+> resolution, and the per-language WER table in §5.2 are features, not violations —
+> never "fix" non-English test fixtures or phonetic rules into English-only forms.
 
-> **Scope:** este archivo documenta el **contrato de implementación** (versiones
-> pinneadas, handshake JNI, reglas críticas, plantillas de nuevos componentes).
-> La cara humana del proyecto — instalación paso a paso, prerequisitos, lista de
-> features en prosa, capturas, agradecimientos, licencia — vive en [`README.md`](README.md).
-> Si dudas de dónde poner algo: si cambia **la cara** → README; si cambia
-> **cómo está hecho** → AGENTS.md.
-
----
-
-## 1. Resumen del Proyecto
-
-App Android que convierte voz en texto **100 % en local**. Se ofrece al sistema de tres formas distintas (para maximizar compatibilidad con teclados/apps):
-
-| Superficie | Cómo se dispara | Ficheros clave |
-|---|---|---|
-| **Popup de voz** | `RecognizerIntent.ACTION_RECOGNIZE_SPEECH` (teclados tipo SwiftKey, búsqueda por voz web) | `RecognizeActivity.java` + `src/recognize.rs` |
-| **Servicio de reconocimiento** | `SpeechRecognizer` (Android) — otros keyboards/apps lo usan como STT | `VoiceRecognitionService.java` + `src/recog_service.rs` |
-| **IME (teclado propio)** | `BIND_INPUT_METHOD` (HeliBoard/FlorisBoard/etc.) | `RustInputMethodService.java` + `src/ime.rs` |
-
-Funciones adicionales: **subtítulos en vivo** sobre audio del sistema (`LiveSubtitleService.java` + `src/subtitle.rs`), **gestión de modelos GGUF** (`ModelsActivity.java` + `src/models.rs`), **overlay flotante** (`FloatingOverlayService.java`) y **transcripción de archivos** (`TranscribeFileActivity.java`).
-
-Post-procesado IA (fork addition): opcional, *off-line-by-default*, refina texto con cualquier LLM compatible OpenAI (`PostProcessor.java`, settings en `PostProcessSettingsActivity.java`).
-
-**Arquitectura general: UN SOLO PROCESO.** Toda la app (MainActivity, IME, servicio de reconocimiento, overlay, subtítulos) corre en el proceso por defecto: `AndroidManifest.xml` **no declara ningún `android:process`** (la afirmación histórica de un proceso `:ime` aislado era falsa y nunca se implementó — corregido 2026-10). Toda la lógica pesada (ASR, captura audio, segmentación, JNI) está en **Rust** compilado como `cdylib` (`Cargo.toml`) y enlazado por JNI desde Java. Los ajustes se guardan en ficheros *marker* en `getFilesDir()` (sin `SharedPreferences`) porque el motor Rust solo lee del *filesystem* y deben ser legibles sin importar qué componente arrancó primero.
-
-> ⚠️ **NO añadir `android:process=":ime"`.** Estaría tentador para "aislar" el teclado, pero rompería dos invariantes reales: `voice_session.rs` **comparte deliberadamente un único `cpal::Stream`** entre el IME y el popup, y el engine vive en un `Arc<Mutex<Engine>>` global. Separar procesos duplicaría el engine y rompería esa compartición.
+> **Scope:** this file documents the **implementation contract** (pinned versions,
+> JNI handshake, critical rules, new-component templates).
+> The human face of the project — step-by-step installation, prerequisites, prose
+> feature list, screenshots, acknowledgements, license — lives in [`README.md`](README.md).
+> If in doubt about where something goes: if it changes the **face** → README; if it
+> changes **how it is built** → AGENTS.md.
 
 ---
 
-## 2. Stack Tecnológico
+## 1. Project Overview
 
-| Capa | Tecnología | Versión / Nota |
+Android app that turns voice into text **100% on-device**. It is exposed to the system in three different ways (to maximize compatibility with keyboards/apps):
+
+| Surface | How it is triggered | Key files |
 |---|---|---|
-| Lenguaje nativo | **Rust** | edition `2021`, `crate-type = ["cdylib"]` |
-| Backend ASR | [`transcribe-cpp`](https://github.com/handy-computer/transcribe.cpp) (ggml + whisper.cpp fork) | `0.1.3` |
-| Audio captura | [`cpal`](https://github.com/RustAudio/cpal) | `0.15` |
-| Canales Rust ⇄ Java | [`jni`](https://github.com/jni-rs/jni) | `0.21` |
-| Concurrencia | `crossbeam-channel`, `once_cell`, `std::sync` (Arc/Mutex/atomic) | — |
-| Logging nativo | `log` + `android_logger` | max level `Info` |
-| Errores | `anyhow` (Rust), `try/catch` + `Throwable` (Java) | — |
-| Lenguaje UI | **Java** (sin Kotlin) | Java 17 source/target |
-| Android Gradle Plugin | `com.android.application` | **9.4.1** — obligatorio para API 37, ver nota |
-| Build tool | Gradle wrapper | **9.8.0** (ver `gradle/wrapper/gradle-wrapper.properties`) |
-| Toolchain humano | JDK 17 · Android NDK **28.2.13676358** (unificado en Gradle = CI = README) · Rust `aarch64-linux-android` · [`cargo-ndk`](https://github.com/bbqsrc/cargo-ndk) | Host soportados: linux-x86_64, darwin-x86_64, darwin-arm64, windows (ver `ndkPrebuiltDir()` en `app/build.gradle.kts`); un host sin prebuilt NDK falla con mensaje claro |
-| Target NDK ABIs | **`arm64-v8a` únicamente** (`abiFilters += "arm64-v8a"`) | excluidas x86 / armeabi-v7a; 16 KB page size aligned (gate `checkNativeAlignment`) |
-| `compileSdk` / `targetSdk` / `minSdk` | Gradle efectivo: `37 / 37 / 26` | **Android 17 = API 37**; Android 15 = API 35. Cubre Android 8.0 (API 26) hasta Android 17 |
-| Optimización de release | R8 (minify) + resource shrinking | `isMinifyEnabled = true`, `isShrinkResources = true`; keep rules en `app/proguard-rules.pro` (JNI + callbacks por nombre). Build type `benchmark` + módulo `:benchmark` para Macrobenchmark / Baseline Profile |
+| **Voice popup** | `RecognizerIntent.ACTION_RECOGNIZE_SPEECH` (SwiftKey-style keyboards, web voice search) | `RecognizeActivity.java` + `src/recognize.rs` |
+| **Recognition service** | `SpeechRecognizer` (Android) — other keyboards/apps use it as STT | `VoiceRecognitionService.java` + `src/recog_service.rs` |
+| **IME (own keyboard)** | `BIND_INPUT_METHOD` (HeliBoard/FlorisBoard/etc.) | `RustInputMethodService.java` + `src/ime.rs` |
+
+Additional features: **live subtitles** over system audio (`LiveSubtitleService.java` + `src/subtitle.rs`), **GGUF model management** (`ModelsActivity.java` + `src/models.rs`), **floating overlay** (`FloatingOverlayService.java`) and **file transcription** (`TranscribeFileActivity.java`).
+
+AI post-processing (fork addition): optional, *off-line-by-default*, refines text with any OpenAI-compatible LLM (`PostProcessor.java`, settings in `PostProcessSettingsActivity.java`).
+
+**Overall architecture: A SINGLE PROCESS.** The whole app (MainActivity, IME, recognition service, overlay, subtitles) runs in the default process: `AndroidManifest.xml` declares no `android:process` (the historical claim of an isolated `:ime` process was false and never implemented — corrected 2026-10). All heavy logic (ASR, audio capture, segmentation, JNI) is in **Rust** compiled as a `cdylib` (`Cargo.toml`) and linked via JNI from Java. Settings are stored in *marker* files under `getFilesDir()` (no `SharedPreferences`) because the Rust engine only reads from the *filesystem* and they must be readable no matter which component started first.
+
+> ⚠️ **DO NOT add `android:process=":ime"`.** It would be tempting to "isolate" the keyboard, but it would break two real invariants: `voice_session.rs` **deliberately shares a single `cpal::Stream`** between the IME and the popup, and the engine lives in a global `Arc<Mutex<Engine>>`. Splitting processes would duplicate the engine and break that sharing.
+
+---
+
+## 2. Technology Stack
+
+| Layer | Technology | Version / Note |
+|---|---|---|
+| Native language | **Rust** | edition `2021`, `crate-type = ["cdylib"]` |
+| ASR backend | [`transcribe-cpp`](https://github.com/handy-computer/transcribe.cpp) (ggml + whisper.cpp fork) | `0.1.3` |
+| Audio capture | [`cpal`](https://github.com/RustAudio/cpal) | `0.15` |
+| Rust ⇄ Java channels | [`jni`](https://github.com/jni-rs/jni) | `0.21` |
+| Concurrency | `crossbeam-channel`, `once_cell`, `std::sync` (Arc/Mutex/atomic) | — |
+| Native logging | `log` + `android_logger` | max level `Info` |
+| Errors | `anyhow` (Rust), `try/catch` + `Throwable` (Java) | — |
+| UI language | **Java** (no Kotlin) | Java 17 source/target |
+| Android Gradle Plugin | `com.android.application` | **9.4.1** — required for API 37, see note |
+| Build tool | Gradle wrapper | **9.8.0** (see `gradle/wrapper/gradle-wrapper.properties`) |
+| Human toolchain | JDK 17 · Android NDK **28.2.13676358** (unified across Gradle = CI = README) · Rust `aarch64-linux-android` · [`cargo-ndk`](https://github.com/bbqsrc/cargo-ndk) | Supported hosts: linux-x86_64, darwin-x86_64, darwin-arm64, windows (see `ndkPrebuiltDir()` in `app/build.gradle.kts`); a host without a prebuilt NDK fails with a clear message |
+| Target NDK ABIs | **`arm64-v8a` only** (`abiFilters += "arm64-v8a"`) | x86 / armeabi-v7a excluded; 16 KB page-size aligned (`checkNativeAlignment` gate) |
+| `compileSdk` / `targetSdk` / `minSdk` | Effective Gradle: `37 / 37 / 26` | **Android 17 = API 37**; Android 15 = API 35. Covers Android 8.0 (API 26) through Android 17 |
+| Release optimization | R8 (minify) + resource shrinking | `isMinifyEnabled = true`, `isShrinkResources = true`; keep rules in `app/proguard-rules.pro` (JNI + callbacks by name). `benchmark` build type + `:benchmark` module for Macrobenchmark / Baseline Profile |
 | Material | Material Components for Android | `1.14.0` (Material 3 + Material You) |
-| HTTP (post-procesado) | OkHttp | `4.12.0` |
-| Almacenamiento clave API | marker `pp_api_key_enc` cifrado AES-256-GCM (formato `v1:`) con clave en AndroidKeyStore | `SecureCredentialStore` + `javax.crypto` del SDK; `androidx.security.crypto` solo para leer el formato legado |
-| Alineación kotlin-stdlib | Forzadas a `1.8.22` (vacías) | ver bloque `constraints` en `app/build.gradle.kts` |
+| HTTP (post-processing) | OkHttp | `4.12.0` |
+| API key storage | marker `pp_api_key_enc` encrypted with AES-256-GCM (`v1:` format) with key in AndroidKeyStore | `SecureCredentialStore` + `javax.crypto` from the SDK; `androidx.security.crypto` only for reading the legacy format |
+| kotlin-stdlib alignment | Pinned to `1.8.22` (empty) | see `constraints` block in `app/build.gradle.kts` |
 
-> ⚠️ **Por qué AGP 9.x y no 8.x:** AGP **8.13.x no puede resolver la plataforma de API 37**. Está probado hasta compile SDK 36.1 y falla con `Failed to find target with hash string 'android-37'` porque instala la plataforma como `android-37.0` pero busca `android-37`. La migración a API 37 exige la línea 9.x. No bajar AGP/Gradle sin bajar también `compileSdk`.
+> ⚠️ **Why AGP 9.x and not 8.x:** AGP **8.13.x cannot resolve the API 37 platform**. It is proven up to compile SDK 36.1 and fails with `Failed to find target with hash string 'android-37'` because it installs the platform as `android-37.0` but looks for `android-37`. Migrating to API 37 requires the 9.x line. Do not downgrade AGP/Gradle without also downgrading `compileSdk`.
 
-> ℹ️ **R8 / non-transitive R classes:** con `android.nonTransitiveRClass=true` (y AGP 9) el `R` de Material **no** contiene atributos definidos en AppCompat. Usa `androidx.appcompat.R.attr.colorPrimary` / `colorError`, pero `com.google.android.material.R.attr.colorOnError` / `colorPrimaryContainer` (esos sí son de Material). Mezclarlos mal rompe la compilación.
+> ℹ️ **R8 / non-transitive R classes:** with `android.nonTransitiveRClass=true` (and AGP 9) Material's `R` does **not** contain attributes defined in AppCompat. Use `androidx.appcompat.R.attr.colorPrimary` / `colorError`, but `com.google.android.material.R.attr.colorOnError` / `colorPrimaryContainer` (those really are Material's). Mixing them up breaks the build.
 
-**Permisos críticos** (`AndroidManifest.xml`):
-- `RECORD_AUDIO`, `INTERNET` (post-procesado), `FOREGROUND_SERVICE`,
+**Critical permissions** (`AndroidManifest.xml`):
+- `RECORD_AUDIO`, `INTERNET` (post-processing), `FOREGROUND_SERVICE`,
   `FOREGROUND_SERVICE_MEDIA_PROJECTION`, `FOREGROUND_SERVICE_MICROPHONE`,
   `SYSTEM_ALERT_WINDOW`, `POST_NOTIFICATIONS`, `BLUETOOTH_CONNECT`.
-- ❌ **`READ_USER_DICTIONARY` fue eliminado** (2026-10): la plataforma lo mantiene fuera del SDK público (`android.Manifest.permission` no expone esa constante), así que una app con SDK moderno **nunca puede obtenerlo**. Declararlo solo anunciaba un acceso imposible y la consulta al `ContentProvider` siempre lanzaba `SecurityException`. **No reintroducirlo.**
-- Backup: `allowBackup="false"` **más** `android:dataExtractionRules` + `fullBackupContent`, que excluyen todo — en Android 12+ `allowBackup=false` por sí solo no impide la transferencia dispositivo-a-dispositivo.
+- ❌ **`READ_USER_DICTIONARY` was removed** (2026-10): the platform keeps it outside the public SDK (`android.Manifest.permission` does not expose that constant), so an app on a modern SDK can **never obtain it**. Declaring it only advertised an impossible access and the `ContentProvider` query always threw `SecurityException`. **Do not reintroduce it.**
+- Backup: `allowBackup="false"` **plus** `android:dataExtractionRules` + `fullBackupContent`, which exclude everything — on Android 12+ `allowBackup=false` alone does not prevent device-to-device transfer.
 
-**i18n:** 7 locales paralelos (EN `values/`, ES `values-es/`, DE `values-de/`, FR `values-fr/`, IT `values-it/`, PT `values-pt/`, RU `values-ru/`) + `values-night/` (estilos dark).
+**i18n:** 7 parallel locales (EN `values/`, ES `values-es/`, DE `values-de/`, FR `values-fr/`, IT `values-it/`, PT `values-pt/`, RU `values-ru/`) + `values-night/` (dark styles).
 
 ---
 
-## 3. Comandos y wiring
+## 3. Commands and wiring
 
-> Comandos user-facing y prerequisitos viven en [`README.md` §Building](README.md#building)
-> y [`README.md` §Prerequisites](README.md#prerequisites). Esta sección sólo
-> lista las **decisiones de wiring** que un agente debe respetar y los puntos
-> donde divergen de la regla general.
+> User-facing commands and prerequisites live in [`README.md` §Building](README.md#building)
+> and [`README.md` §Prerequisites](README.md#prerequisites). This section only
+> lists the **wiring decisions** an agent must respect and where they diverge
+> from the general rule.
 
 ### Wiring Gradle ↔ cargo-ndk (AGENT-ONLY)
 
-- `cargoNdkBuild` está registrada como dependencia de `preBuild` y **sólo se ejecuta
-  cuando falta el `.so`** (`onlyIf { !soFile.exists() }`, con
-  `app/src/main/jniLibs/arm64-v8a/libandroid_transcribe_app.so` como referencia).
-  Consecuencia práctica: si sólo cambian ficheros Rust y el `.so` ya existe,
-  Gradle **no** recompila. Para forzar un rebuild nativo, borra ese `.so`
-  (o ejecuta `cargo ndk -t arm64-v8a build --release` a mano).
-- `app/build.gradle.kts` fuerza `GGML_CPU_ARM_ARCH=armv8.2-a+dotprod+fp16` vía
-  env en `cargoNdkBuild`. **No bajar** este flag: ggml cross-compila con kernels
-  baseline y la inferencia cuantizada cae a ≥4× más lenta. `check_cpu_features`
-  en `engine.rs` aborta al cargar si la CPU no tiene dotprod+fp16 (ARMv8.2 ~2018+).
-- `libc++_shared.so` se copia tras cada build desde el NDK a
-  `app/src/main/jniLibs/<abi>/` (Bionic no la trae integrada y `transcribe-cpp`
-  la enlaza dinámicamente).
-- **Entrega del modelo bundled (APK vs AAB):** son mecanismos mutuamente
-  excluyentes para el mismo variant `release`.
-  - El **APK** tiene que llevar el GGUF dentro del módulo base, porque AGP ignora
-    los asset packs al empaquetar un APK por eso el bloque `if (!isBundle)` en
-    `app/build.gradle.kts` añade `model_assets/src/main/assets/` a
-    `assets.srcDirs` del source set `release` (solo ese source set: el APK de
-    debug se queda sin modelo a propósito).
-  - El **AAB** debe llevar el GGUF **solo** en el asset pack `:model_assets`
-    (`dynamicDelivery = "install-time"`), o Play recibiría 750 MB duplicados.
-  - Una invocación que pida **ambos** falla al configurar con un mensaje
-    accionable (`bundleTaskNames` y `apkTaskNames` no vacíos). Antes prefería
-    silenciosamente la rama bundle y producia un APK de 32 MB sin modelo que
-    compilaba "bien". **Construye cada artefacto en su propia invocación.**
-  - Dos gates de artefacto lo verifican sobre el fichero real, no sobre flags:
-    `verifyReleaseApkModel` (dependencia de `assembleRelease`) y
-    `verifyReleaseBundleModel` (dependencia de `signReleaseBundle`). Ambos abren
-    el zip y exigen que el modelo esté **exactamente una vez y en la ruta exacta**
-    del tipo de artefacto (APK → `assets/builtin-model/<nombre>`, AAB →
-    `model_assets/assets/builtin-model/<nombre>`); un camino anidado o de otro
-    módulo que solo *termine* con ese sufijo se rechaza, y cualquier copia extra
-    del mismo fichero en cualquier otra ruta cuenta como duplicado.
-    `verifyReleaseApkModel` solo se puede saltar con
-    `-Pauratranscribe.allowModelLessReleaseApk=true`, que imprime un WARNING y
-    solo cubre artefactos **sin** modelo (una ruta mal ubicada nunca se salta);
-    el AAB no tiene opt-out.
-  - La decisión APK/AAB vive en dos funciones puras de `app/build.gradle.kts`
-    (`packagingTaskSets(taskNames)` y `packagingDecision(taskNames)` → modo
-    `apk|bundle|ambiguous|neither`), y la tarea `verifyPackagingDecision` las
-    ejerce junto con los gates de modelo sobre **archivos sintéticos**
-    (17 invocaciones representativas × 15 archivos: acepta y rechaza en ambas
-    direcciones, incluidos rutas anidadas con el sufijo correcto, módulo
-    equivocado, duplicados con copia extra y el escape hatch con modelo mal
-    ubicado). Es gate duro en ambos workflows y dependencia de `check`, así
-    que un cambio en la heurística de nombres de tarea falla antes de que nadie
-    publique un artefacto sin modelo. No lo sustituyas por un test que recalcule
-    la respuesta esperada por su cuenta: tiene que llamar al mismo código.
-  - `scripts/verify_release_artifact.py` es la verificación **independiente**
-    del artefacto ya construido (`--kind apk|aab`, hash de contenido contra el
-    asset fuente, rechazo de ausente/duplicado/mal ubicado/truncado/corrupto).
-    Sus 21 tests (`scripts/test_verify_release_artifact.py`) corren como gate en
-    ambos workflows porque son Python puro, sin SDK ni modelo descargado; exigen
-    la ruta exacta por tipo de artefacto y que un error al leer una entrada del
-    zip falle cerrado con diagnóstico (no con un traceback sin capturar).
-  - `downloadModels` se cablea a `preBuild` cuando la invocación produce un
-    artefacto de release (y no es una corrida lint/test/`checkModels`), no
-    cuando "no contiene la palabra Debug" — que era la condición anterior y
-    dejaba sin modelo el APK de release de `assembleDebug assembleRelease`.
+- `cargoNdkBuild` is registered as a `preBuild` dependency and **only runs
+  when the `.so` is missing** (`onlyIf { !soFile.exists() }`, with
+  `app/src/main/jniLibs/arm64-v8a/libandroid_transcribe_app.so` as the reference).
+  Practical consequence: if only Rust files change and the `.so` already exists,
+  Gradle does **not** recompile. To force a native rebuild, delete that `.so`
+  (or run `cargo ndk -t arm64-v8a build --release` by hand).
+- `app/build.gradle.kts` forces `GGML_CPU_ARM_ARCH=armv8.2-a+dotprod+fp16` via
+  env in `cargoNdkBuild`. **Do not lower** this flag: ggml cross-compiles with
+  baseline kernels and quantized inference drops to ≥4× slower. `check_cpu_features`
+  in `engine.rs` aborts at load time if the CPU lacks dotprod+fp16 (ARMv8.2 ~2018+).
+- `libc++_shared.so` is copied after every build from the NDK to
+  `app/src/main/jniLibs/<abi>/` (Bionic does not bundle it and `transcribe-cpp`
+  links it dynamically).
+- **Bundled model delivery (APK vs AAB):** mutually exclusive mechanisms for
+  the same `release` variant.
+  - The **APK** must carry the GGUF inside the base module, because AGP ignores
+    asset packs when packaging an APK — that is why the `if (!isBundle)` block in
+    `app/build.gradle.kts` adds `model_assets/src/main/assets/` to
+    `assets.srcDirs` of the `release` source set (only that source set: the debug
+    APK deliberately ships without a model).
+  - The **AAB** must carry the GGUF **only** in the `:model_assets` asset pack
+    (`dynamicDelivery = "install-time"`), or Play would receive 750 MB duplicated.
+  - An invocation requesting **both** fails at configuration time with an
+    actionable message (`bundleTaskNames` and `apkTaskNames` both non-empty). It used
+    to silently prefer the bundle branch and produce a 32 MB model-less APK that
+    compiled "fine". **Build each artifact in its own invocation.**
+  - Two artifact gates verify this against the real file, not flags:
+    `verifyReleaseApkModel` (a dependency of `assembleRelease`) and
+    `verifyReleaseBundleModel` (a dependency of `signReleaseBundle`). Both open
+    the zip and require the model to be present **exactly once and at the exact path**
+    for the artifact type (APK → `assets/builtin-model/<name>`, AAB →
+    `model_assets/assets/builtin-model/<name>`); a nested path or one from another
+    module that merely *ends* with that suffix is rejected, and any extra copy
+    of the same file under any other path counts as a duplicate.
+    `verifyReleaseApkModel` can only be skipped with
+    `-Pauratranscribe.allowModelLessReleaseApk=true`, which prints a WARNING and
+    only covers **model-less** artifacts (a misplaced path is never skipped);
+    the AAB has no opt-out.
+  - The APK/AAB decision lives in two pure functions in `app/build.gradle.kts`
+    (`packagingTaskSets(taskNames)` and `packagingDecision(taskNames)` → mode
+    `apk|bundle|ambiguous|neither`), and the `verifyPackagingDecision` task
+    exercises them together with the model gates against **synthetic files**
+    (17 representative invocations × 15 files: accepts and rejects in both
+    directions, including nested paths with the correct suffix, wrong module,
+    duplicates with an extra copy, and the escape hatch with a misplaced model).
+    It is a hard gate in both workflows and a dependency of `check`, so a change
+    to the task-name heuristics fails before anyone publishes a model-less
+    artifact. Do not replace it with a test that recomputes the expected answer
+    on its own: it must call the same code.
+  - `scripts/verify_release_artifact.py` is the **independent** verification of
+    the already-built artifact (`--kind apk|aab`, content hash against the
+    source asset, rejection of missing/duplicated/misplaced/truncated/corrupt).
+    Its 21 tests (`scripts/test_verify_release_artifact.py`) run as a gate in
+    both workflows because they are pure Python, with no SDK or downloaded model;
+    they require the exact path per artifact type and demand that a zip-entry
+    read error fail closed with a diagnosis (not an uncaught traceback).
+  - `downloadModels` is wired to `preBuild` when the invocation produces a
+    release artifact (and is not a lint/test/`checkModels` run), not when "it
+    does not contain the word Debug" — which was the previous condition and left
+    the release APK of `assembleDebug assembleRelease` without a model.
 
-### Build Pipeline & Continuous Integration (REGLA GRABADA A FUEGO)
+### Build Pipeline & Continuous Integration (SET-IN-STONE RULE)
 
-- 🤖 **Compilaciones de Depuración (Debug):** Se realizan SIEMPRE a través de GitHub Actions (`Build Debug APK` workflow), el cual recompila y envía automáticamente el archivo APK de depuración al usuario a través del bot de Telegram.
-- 🚀 **Compilaciones de Lanzamiento (Release):** Se realizan SIEMPRE a través de GitHub Actions (`Build Signed Release APK` workflow / `android_release.yml`) mediante tags `vX.Y.Z` o disparadores manuales.
-- 🛠️ **Disparador Manual Obligatorio (`workflow_dispatch`):** Todos los workflows de release (`android_release.yml`) deben mantener habilitado `workflow_dispatch` en su bloque `on:` y `tag_name: v${{ env.VERSION_NAME }}` en el paso de publicación. Esto garantiza resiliencia si GitHub Actions sufre un outage o pierde un evento de tag.
-- 📝 **Extensión y concisión del texto de Release (REGLA CLAVE):** El texto descriptivo de las releases (el contenido de `RELEASE_NOTES.md` que publica el CI en GitHub Releases) debe tener obligatoriamente una extensión de **máximo entre 125 y 250 palabras**. Debe ser técnico, conciso y orientado al impacto real (rendimiento, memoria, consumo, nuevas capacidades). `RELEASE_NOTES.md` contiene **únicamente la versión que se va a publicar**, evitando duplicar historiales antiguos (el historial histórico completo pertenece exclusivamente a `CHANGELOG.md`).
+- 🤖 **Debug builds:** ALWAYS done via GitHub Actions (`Build Debug APK` workflow), which recompiles and automatically delivers the debug APK to the user through the Telegram bot.
+- 🚀 **Release builds:** ALWAYS done via GitHub Actions (`Build Signed Release APK` workflow / `android_release.yml`) via `vX.Y.Z` tags or manual triggers.
+- 🛠️ **Mandatory manual trigger (`workflow_dispatch`):** all release workflows (`android_release.yml`) must keep `workflow_dispatch` enabled in their `on:` block and `tag_name: v${{ env.VERSION_NAME }}` in the publishing step. This guarantees resilience if GitHub Actions suffers an outage or loses a tag event.
+- 📝 **Release text length and conciseness (KEY RULE):** the descriptive release text (the contents of `RELEASE_NOTES.md` that CI publishes to GitHub Releases) must be **at most 125 to 250 words** long. It must be technical, concise, and focused on real impact (performance, memory, consumption, new capabilities). `RELEASE_NOTES.md` contains **only the version being published**, avoiding duplication of old history (the full historical record belongs exclusively to `CHANGELOG.md`).
 
-### Regla de validación por entorno (2026-08-06, actualizada 2026-10 — REGLA GRABADA A FUEGO)
+### Environment-based validation rule (2026-08-06, updated 2026-10 — SET-IN-STONE RULE)
 
-La regla depende del **tipo de host**, no del proyecto. Averigua primero dónde estás ejecutando:
+The rule depends on the **host type**, not the project. First find out where you are running:
 
-- 📱 **Host tipo dispositivo móvil / embebido (p. ej. un Android userspace ARM64 sin KVM): NUNCA ejecutar compilaciones pesadas locales.** `./gradlew assembleDebug`, `cargo build`, `cargo ndk ...`, `cargo check` con NDK, `assembleRelease`, etc. sobrecargan el sistema y pueden dejarlo inoperativo (verificado 2026-08-06). En ese host toda validación de compilación se hace **de forma dinámica vía GitHub**: `git commit` + `git push` a `main` dispara el workflow debug (`debug_telegram.yml`), que corre todos los gates — `cargo fmt --check`, `check_translations.py`, `test_send_telegram.py`, `test_verify_release_artifact.py`, `bench_performance.py`, `testDebugUnitTest`, `assembleDebug` (compila el Rust vía cargo-ndk), `lintDebug`, `checkModels`, `checkNativeAlignment`, `verifyPackagingDecision` y `:benchmark:assembleBenchmark` — y envía el APK a Telegram. Se lee el resultado con `gh run list` / `gh run view` y se **itera: arreglar → push → leer CI → repetir**. Se permiten gates ligeros: lectura estática, `git diff`, `cargo fmt --check`, `python3 scripts/check_translations.py`, edición de strings XML.
-- 💻 **Equipo físico (portátil/escritorio con SDK Android, NDK, Rust y red): compilar en local es lo esperado y lo preferido.** Aquí la validación real es local, en este orden: `./gradlew :app:testDebugUnitTest` (rápido; no dispara `cargoNdkBuild`) → `python3 scripts/check_translations.py` → `./gradlew :app:lintDebug` → `./gradlew :app:assembleDebug` (usa el `.so` ya construido) → `./gradlew :app:assembleRelease` si el cambio toca R8. En este tipo de host **no** hace falta esperar a CI para saber si compila.
-- 🛠️ `gh` está autenticado como el mantenedor; úsalo para inspeccionar runs del CI cuando estés en el host embebido.
+- 📱 **Mobile / embedded-type host (e.g. an ARM64 Android userspace without KVM): NEVER run heavy local builds.** `./gradlew assembleDebug`, `cargo build`, `cargo ndk ...`, NDK `cargo check`, `assembleRelease`, etc. overload the system and can leave it unresponsive (verified 2026-08-06). On that host all build validation is done **dynamically via GitHub**: `git commit` + `git push` to `main` triggers the debug workflow (`debug_telegram.yml`), which runs every gate — `cargo fmt --check`, `check_translations.py`, `test_send_telegram.py`, `test_verify_release_artifact.py`, `bench_performance.py`, `testDebugUnitTest`, `assembleDebug` (compiles the Rust via cargo-ndk), `lintDebug`, `checkModels`, `checkNativeAlignment`, `verifyPackagingDecision` and `:benchmark:assembleBenchmark` — and sends the APK to Telegram. Read the result with `gh run list` / `gh run view` and **iterate: fix → push → read CI → repeat**. Light gates are allowed: static reading, `git diff`, `cargo fmt --check`, `python3 scripts/check_translations.py`, XML string edits.
+- 💻 **Physical machine (laptop/desktop with Android SDK, NDK, Rust, and network): building locally is expected and preferred.** Here real validation is local, in this order: `./gradlew :app:testDebugUnitTest` (fast; does not trigger `cargoNdkBuild`) → `python3 scripts/check_translations.py` → `./gradlew :app:lintDebug` → `./gradlew :app:assembleDebug` (uses the already-built `.so`) → `./gradlew :app:assembleRelease` if the change touches R8. On this host type there is **no** need to wait for CI to know whether it compiles.
+- 🛠️ `gh` is authenticated as the maintainer; use it to inspect CI runs when on the embedded host.
 
 ### Signing (AGENT-ONLY)
 
-Los tres casos están explícitos en `app/build.gradle.kts` y verificados
-(2026-10, host x86_64):
+The three cases are explicit in `app/build.gradle.kts` and verified
+(2026-10, x86_64 host):
 
-| Estado | `./gradlew :app:assembleRelease` |
+| State | `./gradlew :app:assembleRelease` |
 |---|---|
-| Keystore **+** las 3 env vars (`KEY_ALIAS`, `KEY_PASS`, `STORE_PASS`) | Firma con `signingConfigs.release` → `app-release.apk` firmado (verificado con `apksigner verify`) |
-| Keystore **pero** falta alguna env var, en una tarea que construye release | **Falla con error claro** (hardening 2026-08-06): nunca se firma con credenciales por defecto |
-| **Sin** keystore | Build correcto → `app-release-unsigned.apk` sin firmar |
+| Keystore **+** all 3 env vars (`KEY_ALIAS`, `KEY_PASS`, `STORE_PASS`) | Signs with `signingConfigs.release` → signed `app-release.apk` (verified with `apksigner verify`) |
+| Keystore **but** some env var missing, in a task that builds release | **Fails with a clear error** (2026-08-06 hardening): never signs with default credentials |
+| **No** keystore | Correct build → unsigned `app-release-unsigned.apk` |
 
-**Un build correcto NO es un release publicable.** El caso 3 es el que produce un
-artefacto sin firmar: sirve para F-Droid/buildserver, que recompila desde fuentes
-y firma él mismo, pero **nunca** se publica desde CI. La separación es explícita:
+**A correct build is NOT a publishable release.** Case 3 is what produces an
+unsigned artifact: it serves F-Droid/buildserver, which recompiles from source
+and signs itself, but it is **never** published from CI. The separation is explicit:
 
-| Workflow | Qué produce | ¿Publica? |
+| Workflow | What it produces | Does it publish? |
 |---|---|---|
-| `debug_telegram.yml` | APK de **debug** firmado con la debug key del repo | No publica un release: sube el APK como *workflow artifact* y lo envía al bot de Telegram |
-| `android_release.yml` | APK **y** AAB de release firmados con la clave del proyecto | Sí: GitHub Release con ambos ficheros, solo si todos los gates pasan |
-| Build desde fuentes (sin keystore, p. ej. F-Droid) | `app-release-unsigned.apk` sin firmar | No es un canal de este repo; lo firma quien lo consume |
+| `debug_telegram.yml` | **debug** APK signed with the repo's debug key | Does not publish a release: uploads the APK as a *workflow artifact* and sends it to the Telegram bot |
+| `android_release.yml` | Release APK **and** AAB signed with the project key | Yes: GitHub Release with both files, only if all gates pass |
+| Source build (no keystore, e.g. F-Droid) | Unsigned `app-release-unsigned.apk` | Not a channel of this repo; whoever consumes it signs it |
 
-Garantías del workflow de release (no las relajes):
+Release workflow guarantees (do not relax them):
 
-1. **Preflight de credenciales antes de compilar.** Los cuatro secretos
-   (`KEYSTORE_BASE64`, `STORE_PASS`, `KEY_ALIAS`, `KEY_PASS`) se comprueban por
-   presencia y el job sale `1` si falta alguno. Se comprueba la *presencia*: el
-   valor no se imprime jamás (`"${!name:-}"`, nunca `echo $secret`).
-2. **Se rechaza el escape hatch del modelo.** El paso `Reject the model-less
-   release escape hatch` hace `grep` de `allowModelLessReleaseApk=true` en
-   `.github/workflows/` y revisa las `ORG_GRADLE_PROJECT_*` del entorno. La aguja
-   se arma con dos mitades (`"allowModelLess""ReleaseApk=true"`) a propósito:
-   escrita como un literal, el propio paso se auto-detectaría.
-3. **Nunca se firma con la debug key.** Tras `assembleRelease`, el APK se valida
-   con `apksigner verify --print-certs` y el paso compara el SHA-256 del firmante
-   contra el de `keystore/debug.keystore` (`androiddebugkey`); si coinciden,
-   `::error::` y salida `1`. El AAB pasa por el equivalente con `jarsigner -verify
+1. **Credential preflight before compiling.** All four secrets
+   (`KEYSTORE_BASE64`, `STORE_PASS`, `KEY_ALIAS`, `KEY_PASS`) are checked for
+   presence and the job exits `1` if any is missing. *Presence* is checked: the
+   value is never printed (`"${!name:-}"`, never `echo $secret`).
+2. **The model-less release escape hatch is rejected.** The `Reject the model-less
+   release escape hatch` step greps for `allowModelLessReleaseApk=true` in
+   `.github/workflows/` and inspects the `ORG_GRADLE_PROJECT_*` environment. The needle
+   is assembled from two halves (`"allowModelLess""ReleaseApk=true"`) on purpose:
+   written as one literal, the step would match itself.
+3. **Never sign with the debug key.** After `assembleRelease`, the APK is validated
+   with `apksigner verify --print-certs` and the step compares the signer's SHA-256
+   against `keystore/debug.keystore` (`androiddebugkey`); on a match,
+   `::error::` and exit `1`. The AAB goes through the equivalent with `jarsigner -verify
    -certs` + `keytool -printcert -jarfile`.
-4. **Un artefacto sin firmar no se publica.** Se rechaza explícitamente un
-   `*-unsigned.apk` por nombre, y en el AAB se inspecciona la **salida** de
-   `jarsigner` (`jar is unsigned` → error) porque `jarsigner -verify` sale `0`
-   incluso con un bundle sin firmar.
-5. **Orden correcto.** `zipalign -c -P 16 -v 4` (16 KB de Android 17, no el
-   `-c 4` histórico) y `apksigner verify` corren sobre el APK ya empaquetado y
-   **antes** de `Upload`/`Create Release`; cualquier fallo corta el job, así que
-   el Release no llega a crearse.
+4. **An unsigned artifact is never published.** A `*-unsigned.apk` is explicitly
+   rejected by name, and for the AAB the **output** of `jarsigner` is inspected
+   (`jar is unsigned` → error) because `jarsigner -verify` exits `0`
+   even for an unsigned bundle.
+5. **Correct order.** `zipalign -c -P 16 -v 4` (Android 17's 16 KB, not the
+   historical `-c 4`) and `apksigner verify` run against the already-packaged APK
+   and **before** `Upload`/`Create Release`; any failure stops the job, so the
+   Release never gets created.
 
-> ⚠️ **`set -e -o pipefail` en todo paso que use `| tee`.** Sin `pipefail` el
-> estado del paso es el de `tee` (siempre 0): el gate de tests "pasaba" siempre.
-> Hubo un caso real de esto en `debug_telegram.yml` (2026-10-09).
+> ⚠️ **`set -e -o pipefail` in every step that uses `| tee`.** Without `pipefail`
+> the step status is `tee`'s (always 0): the `debug_telegram.yml` test gate "passed"
+> unconditionally. There was a real case of this (2026-10-09).
 
-- ⚠️ **El `signingConfig` de release sólo se adjunta al build type si el keystore
-existe** (`hasReleaseKeystore`). Adjuntar un `signingConfig` cuyo `storeFile` nunca
-se asignó hace que AGP aborte en `validateSigningRelease` con *"Keystore file not
-set for signing config release"*: eso rompía `assembleRelease` en un clon limpio
-**y en el buildserver de F-Droid**, que compila desde fuentes y firma él mismo.
-No volver a atar `signingConfigs.getByName("release")` incondicionalmente.
-- En CI la keystore es base64-decoded desde un repo secret (`KEYSTORE_BASE64`)
-  **después** del preflight y antes de cualquier tarea de release; ver
-  `.github/workflows/android_release.yml` §`Decode Keystore`. El fichero
-  `release.keystore` resultante ya está en `.gitignore`.
-- La keystore de **debug** (`keystore/debug.keystore`, alias `androiddebugkey`,
-  password `android`) sí está versionada a propósito: la usa la firma de debug y
-  es contra la que el workflow de release compara para rechazar un APK firmado
-  con la debug key. Su SHA-256 es
+- ⚠️ **The release `signingConfig` is only attached to the build type when the keystore
+exists** (`hasReleaseKeystore`). Attaching a `signingConfig` whose `storeFile` was never
+assigned makes AGP abort in `validateSigningRelease` with *"Keystore file not
+set for signing config release"*: that broke `assembleRelease` on a clean clone
+**and on the F-Droid buildserver**, which compiles from source and signs itself.
+Do not bind `signingConfigs.getByName("release")` unconditionally again.
+- In CI the keystore is base64-decoded from a repo secret (`KEYSTORE_BASE64`)
+  **after** the preflight and before any release task; see
+  `.github/workflows/android_release.yml` §`Decode Keystore`. The resulting
+  `release.keystore` file is already in `.gitignore`.
+- The **debug** keystore (`keystore/debug.keystore`, alias `androiddebugkey`,
+  password `android`) is versioned on purpose: debug signing uses it, and the
+  release workflow compares against it to reject a debug-key-signed APK. Its SHA-256 is
   `437be41f5719ee1e8c75fb2d005683bd97ce3daccaa615fa53eca89e7ef6e46d`
-  (verificado contra `apksigner verify --print-certs` de `app-debug.apk`,
-  2026-10). No la sustituyas ni la uses para un artefacto distribuible.
+  (verified against `apksigner verify --print-certs` of `app-debug.apk`,
+  2026-10). Do not replace it or use it for a distributable artifact.
 
-### Validación y estilo (Ley de Arneses / Gauntlet de Uncle Bob)
+### Validation and style (Harness Law / Uncle Bob's Gauntlet)
 
-- 🛡️ **La Regla del Guantelete (*The Gauntlet Validation Rule*):** De acuerdo con la filosofía de arnés de pruebas (*Test Harness*) postulada por Robert C. Martin ("Uncle Bob") para el desarrollo con IA, los asistentes de código **no** deben solicitar revisiones manuales línea por línea al usuario. Toda modificación debe someterse a portones automatizados de prueba/compilación y presentar evidencia empírica (`BUILD SUCCESSFUL`) en los registros de salida antes de declarar completada la tarea.
-- 🛡️ **Invariantes Algorítmicos y Pruebas Negativas Obligatorias (2026-08-14):** Cualquier optimización o cambio heurístico en motores de coincidencia (corrector fonético, VAD, tokenización, segmentación de audio) debe incluir obligatoriamente suites de pruebas negativas (validar que oraciones/entradas cotidianas no relacionadas produzcan 0 falsos positivos y 0 sustituciones espurias). Se priorizan librerías canónicas auditadas (`strsim`, etc.) con filtros de orden $O(1)$ (e.g. poda rápida por longitud) frente a reimplementaciones matriciales ad-hoc sin cobertura exhaustiva.
-- **Soporte Multi-Arquitectura (ARM64 + x86_64):** La aplicación y sus pipelines de construcción deben ser compatibles y validables tanto en dispositivos/máquinas anfitrionas ARM64 como en portátiles/emuladores x86_64.
-- **Protección Térmica y de CPU en Móviles:** Las pruebas unitarias locales (`testDebugUnitTest`) se ejecutan aisladas en la JVM sin desencadenar la compilación pesada nativa en Rust (`cargoNdkBuild`), protegiendo el procesador del dispositivo. La generación de binarios APK/AAB completos se realiza en CI/CD (GitHub Actions). **En hosts tipo dispositivo móvil/embebido (regla 2026-08-06, ver "Regla de validación por entorno"), el agente no compila nada localmente: valida únicamente push a `main` + resultado del workflow debug de GitHub Actions.**
-- **Anulación de AAPT2 del Sistema (solo host ARM64 Linux):** `android.aapt2FromMavenOverride` está **comentado** en `gradle.properties`. Descoméntalo (apuntando a un `aapt2` real) **únicamente** si estás en un host ARM64 Linux donde el AAPT2 de Maven no puede ejecutarse. Nunca lo dejes activo con una ruta fija: históricamente apuntaba a `/data/data/com.termux/files/usr/bin/aapt2` y en cualquier otro host rompía todas las tareas de recursos.
-- **Validación automatizada:** Ejecutar `./gradlew assembleDebug` o suites de unit test sin nuevos advertencias o fallos + smoke test funcional en dispositivo/emulador.
-- **Java:** Sigue las convenciones de §4.
-- **Rust:** Sigue el estilo inline existente (4 espacios, `rustfmt` por defecto).
-- **Gates configurados / evidencia (Guantelete ABIERTO):**
-  - `testDebugUnitTest`: **269 tests JVM verdes, 0 fallos, 0 errores** (`BUILD SUCCESSFUL`, medido 2026-10-09 en host x86_64): `ModelAvailabilityTest` (sondeo de modelo fuera del hilo principal: marker vacío, nombre que apunta a un fichero inexistente, nombre con espacios, fichero homónimo en el directorio equivocado, `AssetManager` nulo, `isModelReady` con la rama importada) + markers/subtitle prefs + `CallRegistryTest` (cancelación por owner) + `MarkerAtomicityTest` (lecturas concurrentes) + `FileSha256Test` + `AccessibilityInsertionTest` (inserción de dictado en la posición real del cursor/selección, incluidos selección desconocida `-1`, fuera de rango, invertida y multilínea) + `FileAudioChunksTest` (remuestreo acotado a la región válida, **upsampling** y ratios no enteros 44.1/48/32 kHz → 16 kHz, **garantía de que la salida no aliasa el buffer de chunk reutilizado**, longitudes 2:1/identidad/degeneradas, clamping de `length` fuera de rango, ausencia de NaN/Inf; **`exceedsDurationCap` con el límite exacto, un frame por encima, escalado por sample rate y argumentos inválidos**; unión de transcripciones sin espacios sobrantes, saltando fragmentos vacíos, preservando el orden en 60 chunks y con un solo chunk) + `PostProcessorTest` (suite HTTP P1.3 — payload, `stream:false`, `${output}` una vez, errores, fallback, timeout real de OkHttp por seam con valores escalados — **más DNS fail real con host `.invalid` y connect timeout por seam contra `192.0.2.1`**; los 30 s/60 s de producción se asertan, no se esperan en wall-clock) + `SecureCredentialStoreTest` (crypto, formato `v1:`, tag GCM, verificación de la escritura, borrado que **reporta** si el fichero sobrevivió, y las rutas de fallo de un `KeyProvider` que lanza `RuntimeException`: se convierte en `CredentialStoreException` tipada, sin escribir nada ni caer en texto plano, y el diagnóstico lleva solo el nombre de la clase — nunca el mensaje del provider ni material de la clave) + `CredentialMigrationTest` (orquestación de la migración de la API key: precedencia entre las tres fuentes legadas, write-before-delete, verificación del resultado de `commit()`, recuperación tras Keystore no disponible, sentinel, borrado explícito y **borrado que no se puede completar**: devuelve `false` en vez de mentir y deja la lápida; corre contra `CredentialMigration` con el `SecureCredentialStore` real y dobles en memoria solo para las fuentes prefs) + `CredentialOperationsTest` (la **lane** que serializa toda mutación de credencial: una importación en curso no resucita una clave borrada, subida y borrado concurrentes dejan un estado determinista, un fallo de migración no revive la credencial, una tarea que lanza `RuntimeException` se contiene, se reporta saneada y no bloquea la lane, y — lado lector — encolar una subida y luego leer observa la subida, encolar un borrado deja las lecturas vacías, una lectura con la importación pausada ve el estado *previo* a la mutación y el valor importado después, y las finalizaciones llegan una vez por envío y en orden de envío, incluidos los caminos de fallo) + `CredentialReadTest` (contrato de lectura: una lápida de borrado **oculta todas las fuentes** — store y copia legada incluidas —; un store ilegible se sirve como vacío y **nunca** cae al marker en texto plano; el marker solo se sirve mientras no exista store; el resultado nunca es null). No citar `34`, `109`, `123`, `176`, `234` ni `250` tests: esos números son históricos.
-  - **Privacidad (2026-08-04):** el transcript crudo y los detalles de error del post-procesado **no se loguean en release** (gating con `BuildConfig.DEBUG`). No reintroducir logs de texto transcrito sin gate de debug.
-  - **Gates CI (actualizado 2026-10-09):**
-    - *Ambos workflows, job `validate` (barato, sin descargar el modelo):* `cargo fmt --all -- --check`, `scripts/check_translations.py`, `scripts/test_verify_release_artifact.py`, `testDebugUnitTest` y `:app:verifyPackagingDecision` (este último ejerce la decisión de packaging y los gates de modelo sobre archivos sintéticos, sin descargar un byte del GGUF).
-    - *Solo release:* preflight de los cuatro secretos de firma, rechazo del escape hatch del modelo, `lintDebug`, `checkNativeAlignment` (antes del paso de 750 MB, para fallar rápido), `assembleRelease` + `zipalign -c -P 16` + `apksigner verify` + rechazo de debug key + `verify_release_artifact.py --kind apk`, luego `bundleRelease` + `jarsigner`/`keytool` + rechazo de debug key + `verify_release_artifact.py --kind aab`, y sólo después `Upload`/`Create Release`. APK y AAB van en **invocaciones separadas**.
-    - *Solo debug (`build`):* `assembleDebug`, `lintDebug`, `checkModels`, `checkNativeAlignment`, `verifyPackagingDecision`, `:benchmark:assembleBenchmark` — todo con `set -e -o pipefail`.
-    - Todo paso con `| tee` lleva `pipefail`; sin él un gate rojo se reporta verde (era el estado del gate de tests de `debug_telegram.yml`).
-    - Acciones pinneadas a las mismas major que ya usaba el repo (`actions/*@v4`, `dtolnay/rust-toolchain@stable`, `gradle/actions/setup-gradle@v4`, `Swatinem/rust-cache@v2`); `permissions: contents: read` a nivel de workflow y `contents: write` sólo en el job que publica.
-  - `checkModels` verifica SHA-256 del asset bundled presente en
-    `model_assets/src/main/assets/builtin-model/`; sigue siendo no-op cuando el
-    asset falta (para que `check` no dependa de tener 750 MB descargados). El
-    no-op es solo sobre el *fuente*: la garantía sobre el artefacto la dan
-    `verifyReleaseApkModel` y `verifyReleaseBundleModel`, que sí fallan si el
-    APK/AAB no lleva el modelo (ver §3 "Entrega del modelo bundled"). La descarga runtime debug **también** verifica SHA-256 antes de activar `active_model` (P0.3, `FileSha256`), pendiente de smoke en dispositivo.
-  - `scripts/check_translations.py` comprueba paridad de nombres en 6 locales alternativos; no detecta todas las cadenas hardcodeadas en Java. P2.4 (2026-08-03): las strings visibles de Java/layouts están migradas a recursos (44 nuevas, gate PASS); excepción documentada para los detalles de error de `PostProcessor` (sin `Context`, seam JVM) y las strings de protocolo JNI que usa la máquina de estados como comparadores.
-  - `lintDebug`: es hard gate. **2026-10 (host x86_64, AGP 9.4.1): 0 errores, 16 warnings** (partiendo de 3 errores / 205 warnings). Los 16 restantes son **deliberados y están documentados**; no se han silenciado con `tools:ignore` ni `@SuppressLint` (dos `ApplySharedPref` menos que en el inventario original: los `commit()` síncronos de la migración de la API key ahora comprueban su resultado, que es justo lo que ese aviso pide, así que ya no se dispara). Re-triados contra el código en 2026-10 (mismo conjunto; recuento actualizado tras el pase de la migración de credenciales). Inventario para no volver a investigarlos desde cero: 5 `InflateParams` (vistas cuyo padre real es `WindowManager`, o la vista devuelta por `onCreateInputView()`), 3 `UselessParent` + 1 `MergeRootFrame` (el contenedor «sobrante» es el tap target de pantalla completa, el gutter del scrim o el target de insets al que el listener aplica `setPadding`), 1 `ObsoleteSdkInt` (`mipmap-anydpi-v26`), 2 `ButtonOrder` (una barra de herramientas de IME/overlay, no un diálogo), 2 `UnusedAttribute` (`enableOnBackInvokedCallback` y `isAccessibilityTool`: solo tienen efecto en API 33+/31+ y ahí sí importan), 1 `ChromeOsAbiSupport` (arm64-only por diseño, §5.1) y 1 `TooManyViews` (la pantalla de ajustes). Cada uno lleva su razón en el propio fichero que lo dispara (comentario junto al `<Button>` de Cancel, junto al `LinearLayout` del disclosure, junto a `abiFilters`, en la cabecera de `recognize_activity.xml`/`service_subtitle.xml`, en el doc de `isAccessibilityTool` y en el XML de `mipmap-anydpi-v26`), **excepto los dos `UnusedAttribute` y el `TooManyViews`**: un atributo dentro de la etiqueta `<application>` no admite comentario XML en línea y el recuento de vistas es del layout entero, así que su justificación vive aquí (y en `CHANGELOG.md`). El `ObsoleteSdkInt` es deliberado: `mipmap-anydpi-v26` **no** puede renombrarse a `mipmap-anydpi` — el calificador `-v26` es obligatorio para los XML de adaptive icon y renombrarlo rompe AAPT con `resource mipmap/ic_launcher not found` (re-verificado 2026-10). La configuración de `lint` en `app/build.gradle.kts` se limpió (2026-10) con `abortOnError = true`, `ignoreWarnings = false` y `checkReleaseBuilds = true`. Antes tenía `ignoreWarnings = true` y ~46 checks desactivados en bloque, lo que ocultaba problemas reales (`NewApi`, `MissingPermission`, receivers sin registrar, componentes exportados, texto hardcodeado, accesibilidad de vistas clicables…). Ahora sólo quedan desactivados un puñado de falsos positivos **documentados** en el propio bloque (`GradleDependency`, `AndroidGradlePluginVersion`, `VectorPath`, `AppLinkUrlError` — este último por los filtros `audio/*`, que son mime handlers y no app links — y `Overdraw`). **No añadir un `disable` nuevo sin justificarlo junto al código.**
-  - Tests Rust `#[cfg(test)]` en `audio` y `corrector` tienen cobertura de lógica pura mediante crate espejo; el crate cdylib completo sigue bloqueado por `transcribe-cpp-sys v0.1.3` y no debe describirse como ejecutado satisfactoriamente en CI hasta existir un workflow/log reproducible.
-  - El plan, los bloqueadores P0 y los criterios de cierre viven en [`GAUNTLETE_PLAN.md`](GAUNTLETE_PLAN.md) y [`.agents/memory/static-audit-debt-2026-08-03.md`](.agents/memory/static-audit-debt-2026-08-03.md).
+- 🛡️ **The Gauntlet Validation Rule:** per the test-harness philosophy postulated by Robert C. Martin ("Uncle Bob") for AI-assisted development, coding assistants must **not** request manual line-by-line reviews from the user. Every change must go through automated test/build gates and present empirical evidence (`BUILD SUCCESSFUL`) in the output logs before the task is declared done.
+- 🛡️ **Algorithmic Invariants and Mandatory Negative Tests (2026-08-14):** any optimization or heuristic change to matching engines (phonetic corrector, VAD, tokenization, audio segmentation) must include negative test suites (verifying that unrelated everyday sentences/inputs produce 0 false positives and 0 spurious substitutions). Audited canonical libraries (`strsim`, etc.) with $O(1)$-order filters (e.g. fast length pruning) are preferred over ad-hoc matrix reimplementations without exhaustive coverage.
+- **Multi-Architecture Support (ARM64 + x86_64):** the app and its build pipelines must be compatible and validatable on both ARM64 devices/host machines and x86_64 laptops/emulators.
+- **Thermal and CPU Protection on Mobile:** local unit tests (`testDebugUnitTest`) run isolated in the JVM without triggering the heavy native Rust build (`cargoNdkBuild`), protecting the device's processor. Full APK/AAB binaries are produced in CI/CD (GitHub Actions). **On mobile/embedded-type hosts (2026-08-06 rule, see "Environment-based validation rule"), the agent compiles nothing locally: it validates only via push to `main` + the GitHub Actions debug workflow result.**
+- **System AAPT2 Override (ARM64 Linux host only):** `android.aapt2FromMavenOverride` is **commented out** in `gradle.properties`. Uncomment it (pointing at a real `aapt2`) **only** if you are on an ARM64 Linux host where the Maven AAPT2 cannot run. Never leave it active with a hardcoded path: it historically pointed at `/data/data/com.termux/files/usr/bin/aapt2` and broke every resource task on any other host.
+- **Automated validation:** run `./gradlew assembleDebug` or unit-test suites with no new warnings or failures + functional smoke test on device/emulator.
+- **Java:** follow the §4 conventions.
+- **Rust:** follow the existing inline style (4 spaces, default `rustfmt`).
+- **Configured gates / evidence (Gauntlet OPEN):**
+  - `testDebugUnitTest`: **269 green JVM tests, 0 failures, 0 errors** (`BUILD SUCCESSFUL`, measured 2026-10-09 on x86_64 host): `ModelAvailabilityTest` (off-main-thread model probing: empty marker, name pointing at a nonexistent file, name with spaces, same-named file in the wrong directory, null `AssetManager`, `isModelReady` with the imported branch) + markers/subtitle prefs + `CallRegistryTest` (owner-based cancellation) + `MarkerAtomicityTest` (concurrent reads) + `FileSha256Test` + `AccessibilityInsertionTest` (dictation insertion at the real cursor/selection position, including unknown selection `-1`, out-of-range, inverted, and multiline) + `FileAudioChunksTest` (resampling bounded to the valid region, **upsampling** and non-integer ratios 44.1/48/32 kHz → 16 kHz, **guarantee that the output does not alias the reused chunk buffer**, 2:1/identity/degenerate lengths, out-of-range `length` clamping, no NaN/Inf; **`exceedsDurationCap` with the exact limit, one frame above, sample-rate scaling, and invalid arguments**; transcript joining without stray spaces, skipping empty fragments, preserving order across 60 chunks, and with a single chunk) + `PostProcessorTest` (HTTP suite P1.3 — payload, `stream:false`, `${output}` once, errors, fallback, real OkHttp timeout via seam with scaled values — **plus a real DNS failure with a `.invalid` host and connect timeout via seam against `192.0.2.1`**; production's 30 s/60 s are asserted, not waited out in wall-clock) + `SecureCredentialStoreTest` (crypto, `v1:` format, GCM tag, write verification, deletion that **reports** whether the file survived, and the failure paths of a `KeyProvider` throwing `RuntimeException`: converted into a typed `CredentialStoreException`, writing nothing and never falling back to plaintext, with the diagnostic carrying only the class name — never the provider message or key material) + `CredentialMigrationTest` (API-key migration orchestration: precedence across the three legacy sources, write-before-delete, `commit()` result verification, recovery when Keystore is unavailable, sentinel, explicit deletion, and **deletion that cannot complete**: returns `false` instead of lying and leaves the tombstone; runs against `CredentialMigration` with the real `SecureCredentialStore` and in-memory doubles only for the prefs sources) + `CredentialOperationsTest` (the **lane** serializing every credential mutation: an in-flight import does not resurrect a deleted key, concurrent upload and deletion leave a deterministic state, a migration failure does not revive the credential, a task throwing `RuntimeException` is contained, reported sanitized, and does not block the lane, and — on the reader side — enqueueing an upload and then reading observes the upload, enqueueing a deletion leaves reads empty, a read with the import paused sees the *pre*-mutation state and the imported value afterwards, and completions arrive once per submission and in submission order, including the failure paths) + `CredentialReadTest` (read contract: a deletion tombstone **hides every source** — encrypted store and legacy copy included —; an unreadable store is served as empty and **never** falls back to the plaintext marker; the marker is only served while no store exists; the result is never null). Do not cite `34`, `109`, `123`, `176`, `234`, or `250` tests: those numbers are historical.
+  - **Privacy (2026-08-04):** the raw transcript and post-processing error details are **not logged in release** (gated with `BuildConfig.DEBUG`). Do not reintroduce transcribed-text logs without a debug gate.
+  - **CI gates (updated 2026-10-09):**
+    - *Both workflows, `validate` job (cheap, no model download):* `cargo fmt --all -- --check`, `scripts/check_translations.py`, `scripts/test_verify_release_artifact.py`, `testDebugUnitTest` and `:app:verifyPackagingDecision` (the latter exercises the packaging decision and the model gates against synthetic files, without downloading a byte of the GGUF).
+    - *Release only:* preflight of the four signing secrets, rejection of the model escape hatch, `lintDebug`, `checkNativeAlignment` (before the 750 MB step, to fail fast), `assembleRelease` + `zipalign -c -P 16` + `apksigner verify` + debug-key rejection + `verify_release_artifact.py --kind apk`, then `bundleRelease` + `jarsigner`/`keytool` + debug-key rejection + `verify_release_artifact.py --kind aab`, and only then `Upload`/`Create Release`. APK and AAB go in **separate invocations**.
+    - *Debug only (`build`):* `assembleDebug`, `lintDebug`, `checkModels`, `checkNativeAlignment`, `verifyPackagingDecision`, `:benchmark:assembleBenchmark` — all with `set -e -o pipefail`.
+    - Every step with `| tee` carries `pipefail`; without it a red gate reports green (that was the state of the `debug_telegram.yml` test gate).
+    - Actions pinned to the same majors the repo already used (`actions/*@v4`, `dtolnay/rust-toolchain@stable`, `gradle/actions/setup-gradle@v4`, `Swatinem/rust-cache@v2`); `permissions: contents: read` at workflow level and `contents: write` only in the publishing job.
+  - `checkModels` verifies the SHA-256 of the bundled asset present in
+    `model_assets/src/main/assets/builtin-model/`; it is still a no-op when the
+    asset is missing (so `check` does not depend on 750 MB being downloaded). The
+    no-op is only about the *source*: the artifact guarantee comes from
+    `verifyReleaseApkModel` and `verifyReleaseBundleModel`, which do fail if the
+    APK/AAB lacks the model (see §3 "Bundled model delivery"). The debug runtime
+    download **also** verifies SHA-256 before activating `active_model` (P0.3,
+    `FileSha256`), pending a smoke test on device.
+  - `scripts/check_translations.py` checks name parity across the 6 alternative locales; it does not catch every hardcoded string in Java. P2.4 (2026-08-03): visible strings from Java/layouts are migrated to resources (44 new ones, gate PASS); documented exception for `PostProcessor` error details (no `Context`, JVM seam) and the JNI protocol strings the state machine uses as comparators.
+  - `lintDebug`: hard gate. **2026-10 (x86_64 host, AGP 9.4.1): 0 errors, 16 warnings** (down from 3 errors / 205 warnings). The remaining 16 are **deliberate and documented**; none silenced with `tools:ignore` or `@SuppressLint` (two fewer `ApplySharedPref` than the original inventory: the synchronous `commit()` calls in the API-key migration now check their result, which is exactly what that warning asks for, so it no longer fires). Re-triaged against the code in 2026-10 (same set; count updated after the credential-migration pass). Inventory so nobody re-investigates from scratch: 5 `InflateParams` (views whose real parent is `WindowManager`, or the view returned by `onCreateInputView()`), 3 `UselessParent` + 1 `MergeRootFrame` (the "redundant" container is the full-screen tap target, the scrim gutter, or the insets target the listener pads with `setPadding`), 1 `ObsoleteSdkInt` (`mipmap-anydpi-v26`), 2 `ButtonOrder` (an IME/overlay toolbar, not a dialog), 2 `UnusedAttribute` (`enableOnBackInvokedCallback` and `isAccessibilityTool`: they only take effect on API 33+/31+ and they matter there), 1 `ChromeOsAbiSupport` (arm64-only by design, §5.1) and 1 `TooManyViews` (the settings screen). Each carries its rationale in the file that triggers it (comment next to the Cancel `<Button>`, next to the disclosure `LinearLayout`, next to `abiFilters`, in the `recognize_activity.xml`/`service_subtitle.xml` headers, in the `isAccessibilityTool` doc, and in the `mipmap-anydpi-v26` XML), **except the two `UnusedAttribute` and the `TooManyViews`**: an attribute inside the `<application>` tag admits no inline XML comment and the view count belongs to the whole layout, so their justification lives here (and in `CHANGELOG.md`). The `ObsoleteSdkInt` is deliberate: `mipmap-anydpi-v26` **cannot** be renamed to `mipmap-anydpi` — the `-v26` qualifier is mandatory for adaptive-icon XML and renaming it breaks AAPT with `resource mipmap/ic_launcher not found` (re-verified 2026-10). The `lint` configuration in `app/build.gradle.kts` was cleaned up (2026-10) with `abortOnError = true`, `ignoreWarnings = false` and `checkReleaseBuilds = true`. It used to have `ignoreWarnings = true` and ~46 checks disabled in bulk, hiding real problems (`NewApi`, `MissingPermission`, unregistered receivers, exported components, hardcoded text, clickable-view accessibility…). Now only a handful of documented false positives remain disabled in the block itself (`GradleDependency`, `AndroidGradlePluginVersion`, `VectorPath`, `AppLinkUrlError` — the latter for the `audio/*` filters, which are mime handlers, not app links — and `Overdraw`). **Do not add a new `disable` without justifying it next to the code.**
+  - Rust `#[cfg(test)]` tests in `audio` and `corrector` cover pure logic via the mirror crate; the full cdylib crate is still blocked by `transcribe-cpp-sys v0.1.3` and must not be described as successfully run in CI until a reproducible workflow/log exists.
+  - The plan, the P0 blockers, and the closing criteria live in [`GAUNTLETE_PLAN.md`](GAUNTLETE_PLAN.md) and [`.agents/memory/static-audit-debt-2026-08-03.md`](.agents/memory/static-audit-debt-2026-08-03.md).
 
 ---
 
-## 4. Convenciones de Código y Estructura
+## 4. Code Conventions and Structure
 
-### 4.1 Arquitectura
+### 4.1 Architecture
 
-- **Patrón:** **Puente JNI por módulo Rust ↔ Java/Kotlin Service**. Cada servicio Java (`RecognizeActivity`, `RustInputMethodService`, `LiveSubtitleService`, `VoiceRecognitionService`) tiene su homólogo en `src/<mod>.rs` y expone al menos `initNative` / `cleanupNative` más acciones de alto nivel (`startRecording`, `stopRecording`, `pushAudio`, ...).
-- **Estado global:** Rust usa `Lazy<Mutex<..>>` (de `once_cell`) para singletons (engine, sesión IME, sesión recog, estado de subtítulos).
-- **Engine compartido:** `Arc<Mutex<Engine>>` con `Condvar` para coordinar cargas concurrentes. Ver patrón completo en `src/engine.rs` (`ensure_loaded_from_thread`).
-- **Modelo de procesos: UNO SOLO.** No existe ningún `android:process` en el manifest. Comparte **marcadores en `getFilesDir()`** — *no* `SharedPreferences` — porque el motor Rust sólo lee del *filesystem* y los ajustes deben estar disponibles sin importar qué componente arrancó primero (el IME puede existir antes que `MainActivity`).
+- **Pattern:** **JNI bridge per Rust ↔ Java/Kotlin Service module**. Each Java service (`RecognizeActivity`, `RustInputMethodService`, `LiveSubtitleService`, `VoiceRecognitionService`) has its counterpart in `src/<mod>.rs` and exposes at least `initNative` / `cleanupNative` plus high-level actions (`startRecording`, `stopRecording`, `pushAudio`, ...).
+- **Global state:** Rust uses `Lazy<Mutex<..>>` (from `once_cell`) for singletons (engine, IME session, recog session, subtitle state).
+- **Shared engine:** `Arc<Mutex<Engine>>` with `Condvar` to coordinate concurrent loads. See the full pattern in `src/engine.rs` (`ensure_loaded_from_thread`).
+- **Single-process model: JUST ONE.** There is no `android:process` in the manifest. **Marker files in `getFilesDir()`** are shared — *not* `SharedPreferences` — because the Rust engine only reads from the *filesystem* and settings must be available no matter which component started first (the IME can exist before `MainActivity`).
 
 ### 4.2 Naming
 
-- **Rust:** `snake_case` para variables/funciones, `PascalCase` para tipos (`Engine`, `VoiceSessionState`, `Endpointing`). `SCREAMING_SNAKE_CASE` para constantes (`MAX_RUN_SAMPLES`, `MIN_SPEECH_LEVEL`). `Java_*` prefix en símbolos JNI exportados.
-- **Java:** `PascalCase` para clases, `camelCase` para campos/métodos. Standard Android (Activity/Service/View).
-- **Recursos:** `snake_case` (`voice_status_ready`, `activity_main`, `bg_card`).
+- **Rust:** `snake_case` for variables/functions, `PascalCase` for types (`Engine`, `VoiceSessionState`, `Endpointing`). `SCREAMING_SNAKE_CASE` for constants (`MAX_RUN_SAMPLES`, `MIN_SPEECH_LEVEL`). `Java_` prefix on exported JNI symbols.
+- **Java:** `PascalCase` for classes, `camelCase` for fields/methods. Standard Android (Activity/Service/View).
+- **Resources:** `snake_case` (`voice_status_ready`, `activity_main`, `bg_card`).
 
-### 4.3 Naming JNI (regla dura)
+### 4.3 JNI naming (hard rule)
 
-Todos los entry points nativos exportados siguen este formato:
+All exported native entry points follow this format:
 
 ```
 Java_dev_notune_transcribe_<JavaClassName>_<methodName>
 ```
 
-Mismas funcionesJava + mismas firmas (incluido el `JClass` aunque no se use). Ver por ejemplo `Java_dev_notune_transcribe_RecognizeActivity_initNative` en `src/recognize.rs`. **No renombrar sin actualizar la declaración nativa en Java.**
+Same Java functions + same signatures (including the `JClass` even when unused). See e.g. `Java_dev_notune_transcribe_RecognizeActivity_initNative` in `src/recognize.rs`. **Do not rename without updating the native declaration in Java.**
 
-Carga de librerías en cada proceso (orden estricto, en bloque `static`):
+Library loading order in every process (strict, in a `static` block):
 
 ```java
 static {
@@ -297,190 +300,191 @@ static {
 }
 ```
 
-### 4.4 Manejo de errores y logging
+### 4.4 Error handling and logging
 
-- **Logging nativo:** `log::info!`, `log::warn!`, `log::error!` (filtrado a `Info`, ver `android_logger::init_once`).
-- **Logging Java:** `Log.d/i/w/e(TAG, msg, throwable)` con `TAG` por clase (`OfflineVoiceInput`, `MainActivity`, `LiveSubtitleService`...).
-- **Call-backs JNI → Java (firmas estables — NO cambiarlas sin tocar todas las superficies):**
-  - `onStatusUpdate(String)` — mensajes como `"Ready"`, `"Listening..."`, `"Transcribing..."`, `"Error: <msg>"`.
-  - `onTextTranscribed(String)` — texto final (post-procesado aplicado si está activo).
-  - `onAudioLevel(float)`/`onRmsChanged(float)` — nivel rms 0..1.
-  - `onSubtitleText(String, boolean)` — parcial (false) o final (true).
-  - `onPartialText(String)` — hipótesis parcial en vivo de modelos streaming (Nemotron) mientras se graba; visual-only en Java (el texto final llega siempre por `onTextTranscribed`/`onResults`). Las superficies sin streaming envían no-op.
-  - `onAutoStop()` — disparo del monitor de endpointing.
-  - **Grabación IME/popup con generación:** las superficies `RustInputMethodService` y `RecognizeActivity` mantienen además las variantes JNI `onStatusUpdate(String, int)`, `onTextTranscribed(String, int)`, `onAudioLevel(float, int)`, `onPartialText(String, int)` y `onAutoStop(int)`. El `int` es el `sessionId` de la grabación; Java descarta callbacks tardíos cuyo ID ya no coincide con la generación activa. El engine/lifecycle conserva las variantes sin ID para estados de carga y compatibilidad con las demás superficies.
-  - **Transcripción de archivos con operation-id (P1.1):** `TranscribeFileActivity` mantiene `onTextTranscribed(String, int)` y `onStatusUpdate(String, int)` donde el `int` es un operation-id único por decode (`AtomicInteger` estático, inmune a recreaciones de Activity); `transcribeAudio(float[], int, int)` lo recibe de Java y lo devuelve en cada callback. Java descarta callbacks cuyo opId ya no es el actual o cuya Activity está `isFinishing()/isDestroyed()`.
+- **Native logging:** `log::info!`, `log::warn!`, `log::error!` (filtered to `Info`, see `android_logger::init_once`).
+- **Java logging:** `Log.d/i/w/e(TAG, msg, throwable)` with a `TAG` per class (`OfflineVoiceInput`, `MainActivity`, `LiveSubtitleService`...).
+- **JNI → Java callbacks (stable signatures — do NOT change them without touching every surface):**
+  - `onStatusUpdate(String)` — messages like `"Ready"`, `"Listening..."`, `"Transcribing..."`, `"Error: <msg>"`.
+  - `onTextTranscribed(String)` — final text (post-processing applied if active).
+  - `onAudioLevel(float)`/`onRmsChanged(float)` — rms level 0..1.
+  - `onSubtitleText(String, boolean)` — partial (false) or final (true).
+  - `onPartialText(String)` — live partial hypothesis from streaming models (Nemotron) while recording; visual-only in Java (final text always arrives via `onTextTranscribed`/`onResults`). Surfaces without streaming send no-ops.
+  - `onAutoStop()` — endpointing monitor trigger.
+  - **IME/popup recording with generation:** the `RustInputMethodService` and `RecognizeActivity` surfaces additionally keep the JNI variants `onStatusUpdate(String, int)`, `onTextTranscribed(String, int)`, `onAudioLevel(float, int)`, `onPartialText(String, int)` and `onAutoStop(int)`. The `int` is the recording's `sessionId`; Java drops late callbacks whose ID no longer matches the active generation. The engine/lifecycle keeps the ID-less variants for load states and compatibility with the other surfaces.
+  - **File transcription with operation-id (P1.1):** `TranscribeFileActivity` keeps `onTextTranscribed(String, int)` and `onStatusUpdate(String, int)` where the `int` is a per-decode unique operation-id (static `AtomicInteger`, immune to Activity recreations); `transcribeAudio(float[], int, int)` receives it from Java and echoes it in every callback. Java drops callbacks whose opId is no longer current or whose Activity is `isFinishing()/isDestroyed()`.
   - `onBenchmarkResult(float audioSecs, float computeSecs, String error)`.
-- **Resiliencia del engine:** `transcribe_shared` hace `panic::catch_unwind` + recuperación de `Mutex` envenenado (`unwrap_or_else(|p| p.into_inner())`). Si lo refactorizas, **mantén estas dos capas**.
+- **Engine resilience:** `transcribe_shared` does `panic::catch_unwind` + poisoned-`Mutex` recovery (`unwrap_or_else(|p| p.into_inner())`). If you refactor it, **keep both layers**.
 
-### 4.5 Manejo de settings (regla del proyecto)
+### 4.5 Settings handling (project rule)
 
-Los ajustes son **marker files en `filesDir()`**, no `SharedPreferences`. Ejemplos:
+Settings are **marker files in `filesDir()`**, not `SharedPreferences`. Examples:
 
-| Marker file | Significado |
+| Marker file | Meaning |
 |---|---|
-| `auto_record` | presente = *Auto-start recording* ON |
-| `select_transcription` | presente = selecciona el texto transcrito |
-| `pause_audio` | presente = pausa audio del sistema mientras se graba |
-| `stop_on_hide` | presente = *Record in background* OFF (default ON es el opuesto) |
-| `auto_stop` | presente = *Auto-stop after silence* ON |
-| `model_language` | contenido = locale BCP-47 (`en-US`, `es-ES`, …) o `auto` |
-| `model_translate` | presente = traducir a inglés (Whisper) |
-| `active_model` | contenido = nombre del GGUF importado en `models/` |
-| `model_threads` | contenido = nº entero; ausente/inválido = automático |
-| `stream_context_right` | contenido = `13`/`6`/`1`/`0` → chunks cache-aware {1.12 s, 560 ms, 160 ms, 80 ms} (Nemotron, `chunk = (right+1) × 80 ms`); ausente/inválido = `13` (default de precisión del modelo). Valores fuera de menú se reintentan con el default del modelo en `run_stream`, no rompen el stream |
-| `hardware_backend` | contenido = `cpu` **siempre**. `src/engine.rs` lee el marker y **sólo lo loguea**: no hay ninguna ruta NNAPI/Vulkan en el motor nativo. `ModelsActivity` ya no ofrece NPU/GPU y normaliza a `cpu` cualquier valor antiguo — no reintroducir opciones de UI sin implementación real detrás |
-| `custom_words` | contenido = términos correctos, uno por línea (líneas `#` = comentarios); ausente/vacío = corrección fonética desactivada |
-| `subtitle_translation_target` | contenido = `auto` (idioma original, sin traducción — decisión de producto) o un locale BCP-47 (`es-ES`, `en-US`, `fr-FR`, `de-DE`, `it-IT`, `pt-PT`, `ru-RU`) → traducción on-device de subtítulos **finalizados** (ML Kit, paquetes vía Google Play Services; fallback siempre al texto original). Lo lee `LiveSubtitleService` al iniciar sesión; no requiere recarga del engine |
+| `auto_record` | present = *Auto-start recording* ON |
+| `select_transcription` | present = select the transcribed text |
+| `pause_audio` | present = pause system audio while recording |
+| `stop_on_hide` | present = *Record in background* OFF (default ON is the opposite) |
+| `auto_stop` | present = *Auto-stop after silence* ON |
+| `model_language` | content = BCP-47 locale (`en-US`, `es-ES`, …) or `auto` |
+| `model_translate` | present = translate to English (Whisper) |
+| `active_model` | content = name of the GGUF imported into `models/` |
+| `model_threads` | content = integer count; absent/invalid = automatic |
+| `stream_context_right` | content = `13`/`6`/`1`/`0` → cache-aware chunks {1.12 s, 560 ms, 160 ms, 80 ms} (Nemotron, `chunk = (right+1) × 80 ms`); absent/invalid = `13` (the model's precision default). Off-menu values are retried with the model's default in `run_stream`, they do not break the stream |
+| `hardware_backend` | content = `cpu` **always**. `src/engine.rs` reads the marker and **only logs it**: there is no NNAPI/Vulkan path in the native engine. `ModelsActivity` no longer offers NPU/GPU and normalizes any old value to `cpu` — do not reintroduce UI options without a real implementation behind them |
+| `custom_words` | content = correct terms, one per line (`#` lines = comments); absent/empty = phonetic correction disabled |
+| `subtitle_translation_target` | content = `auto` (original language, no translation — product decision) or a fixed BCP-47 locale (`es-ES`, `en-US`, `fr-FR`, `de-DE`, `it-IT`, `pt-PT`, `ru-RU`) → on-device translation of **finalized** subtitles (ML Kit, packages via Google Play Services; always falls back to the original text). Read by `LiveSubtitleService` at session start; needs no engine reload |
 
-Bindings típicos (ver `MainActivity.bindMarkerSwitch`): un `CompoundButton` cuja presencia del file representa el estado.
+Typical bindings (see `MainActivity.bindMarkerSwitch`): a `CompoundButton` whose file presence represents the state.
 
-La **clave de API del post-procesado** es la única excepción a los markers planos: se almacena cifrada en reposo (AES-256-GCM, formato versionado `v1:<iv>:<ciphertext>` en `pp_api_key_enc`) con una clave generada y retenida en **AndroidKeyStore** (`SecureCredentialStore` + `AndroidCredentialKeyProvider`), nunca en texto plano ni en Base64. El marker legado `pp_api_key` (Base64) y las copias antiguas de SharedPreferences/EncryptedSharedPreferences se migran al arrancque con *verify-before-delete*: primero se escribe y verifica el cifrado, y solo entonces se borra la copia legada; si la migración falla (p. ej. Keystore no disponible) la credencial legada se conserva y se reintenta en un arranque posterior, sin degradar nunca a almacenamiento en claro. Esa orquestación (precedencia entre las tres fuentes, write-before-delete, sentinel y reintentos) vive en `CredentialMigration` sobre un seam `LegacySources` inyectable — cubierta por tests JVM (`CredentialMigrationTest`); `SettingsManager` solo aporta la implementación Android. El sentinel `pp_api_key_migrated` **vacío** significa «comprobado, nada que importar» y **no** bloquea una copia legada que aparezca después (p. ej. escrita por un build downgraded); el contenido `deleted` es una lápida que solo escribe el borrado explícito cuando alguna copia —el store cifrado incluido— no se pudo eliminar de verdad, y prohíbe reimportarla. **Serialización (2026-10):** toda mutación de la credencial (importación de arranque, guardado y borrado) pasa por una única *lane* (`CredentialOperations`, hilo `credential-ops`), nunca por el hilo llamante ni por el main thread: el orden de operaciones es el de envío, así que un borrado enviado después gana sobre una importación ya en curso (antes podía resucitar la clave) y un guardado enviado después gana sobre el valor importado. `SettingsManager.setApiKey(key, executor, callback)` es por eso **asíncrono**: entrega el resultado durable por callback y la pantalla de ajustes solo canta «guardado» y cierra cuando la operación ha terminado de verdad (si falla, muestra el error y no cierra). Un fallo de Keystore estático (p. ej. `IllegalStateException` de un provider en mal estado) se convierte en `CredentialStoreException` en la frontera cripto del store, no con un `catch (Throwable)` global; un guardado fallido **no** se reporta como correcto ni deja la clave en claro, y un borrado que no pudo eliminar el fichero devuelve `false` en vez de decir que borró. **Lecturas (2026-10):** la lectura es **asíncrona y fuera del hilo llamante**. `SettingsManager.readApiKey(executor, callback)` encola en la lane `credential-ops` (`CredentialOperations.submitValue`) el mismo camino que antes hacía `getApiKey()` — estado en disco + `CredentialRead` — y entrega un `ApiKeyRead` (`LOADED` / `ABSENT` / `UNREADABLE`) por callback; `readPostProcessEnabled(executor, callback)` hace lo propio con el switch. Ningún llamante hace I/O de credencial, lectura de la lápida ni descifrado con AndroidKeyStore en su propio hilo (el main thread para todas las superficies de UI). Los accesores síncronos (`getApiKey`, `isPostProcessEnabled`, `isPostProcessConfigured`) se eliminaron; queda `isPostProcessSwitchedOn()` como sonda **barata** (marker + provider disponible, sin I/O de credencial) para decidir si merece la pena pedir el post-procesado. `PostProcessor.process()`/`fetchModels()` hacen la lectura ordenada y **solo después** construyen la petición: una importación legada aún en curso nunca se lee como «no configurado», y una credencial sin leer (UNREADABLE) se reporta como tal en vez de como ausencia — en ambos casos sin tocar la red (la transcripción cruda se entrega igual, exactamente una vez). La lectura va **antes** de la petición, así que ninguna llamada de red usa una credencial de otro estado de la cola, y una superficie destruida durante la lectura (el callback asíncrono llega tarde) ya no lanza la petición: `PostProcessor` comprueba el validador de ciclo de vida antes de encolar en OkHttp. `CredentialRead` (puro, cubierto por `CredentialReadTest`) no decide nada por su cuenta: solo recibe el estado en disco. La lápida `deleted` **manda sobre todas las fuentes**, así que un borrado es visible para cualquier lector desde el instante en que se escribe — `forget()` la escribe **antes** de borrar nada (antes la escribía después, y en esa ventana el store ya no estaba pero el marker Base64 sí: una lectura devolvía la clave que el usuario acababa de borrar); y como la lápida también manda cuando una copia no se pudo eliminar, una clave borrada no se puede leer ni desde el store que sobrevivió ni desde una copia legada. El orden entre lecturas y mutaciones es **por finalización correcta, no por encolado**: una mutación en curso aún no es visible (estado definido y documentado), y por eso todo llamante que deba observar su propia mutación espera el callback de finalización — la pantalla de ajustes lo hace al guardar, al refrescar la lista de modelos y al probar la conexión — en vez de releer; un llamante que espera una lectura concreta la encola **después** de su mutación, de modo que la lane la ejecuta detrás y observa su resultado; a la inversa, `store()` limpia la lápida en la misma operación que la escritura verificada, para que una clave nueva no quede oculta por un borrado anterior, y `migrate()` que encuentra una lápida **termina el borrado** en vez de considerar el store descifrable como "el usuario guardó una clave nueva". Solo Java lee la clave (cabecera `Authorization` de OkHttp); **Rust no tiene ninguna referencia a ella**. El cifrado en reposo protege ante extracción offline de los datos de la app; NO protege en un dispositivo rooteado/comprometido mientras la app la usa (la clave debe existir en memoria para construir la petición) — ver el threat model en la cabecera de `SecureCredentialStore`. Borrar el marker no garantiza el borrado físico en flash (FTL/wear-levelling).
+The post-processing **API key** is the only exception to plain markers: it is stored encrypted at rest (AES-256-GCM, versioned `v1:<iv>:<ciphertext>` format in `pp_api_key_enc`) with a generated key held in **AndroidKeyStore** (`SecureCredentialStore` + `AndroidCredentialKeyProvider`), never in plaintext or Base64. The legacy `pp_api_key` marker (Base64) and old SharedPreferences/EncryptedSharedPreferences copies are migrated at startup with *verify-before-delete*: the ciphertext is written and verified first, and only then is the legacy copy deleted; if migration fails (e.g. Keystore unavailable) the legacy credential is kept and retried on a later startup, never degrading to plaintext storage. That orchestration (precedence across the three sources, write-before-delete, sentinel, and retries) lives in `CredentialMigration` over an injectable `LegacySources` seam — covered by JVM tests (`CredentialMigrationTest`); `SettingsManager` only provides the Android implementation. The **empty** `pp_api_key_migrated` sentinel means "checked, nothing to import" and does **not** block a legacy copy appearing later (e.g. written by a downgraded build); the `deleted` content is a tombstone written only by explicit deletion when some copy — the encrypted store included — could not really be removed, and it forbids reimporting it. **Serialization (2026-10):** every credential mutation (startup import, save, deletion) goes through a single *lane* (`CredentialOperations`, `credential-ops` thread), never the calling thread or the main thread: operation order is submission order, so a later-submitted deletion wins over an already-running import (it used to be able to resurrect the key) and a later-submitted save wins over the imported value. `SettingsManager.setApiKey(key, executor, callback)` is therefore **asynchronous**: it delivers the durable result via callback and the settings screen only reports "saved" (ES locale: «guardado») and closes once the operation has really finished (on failure it shows the error and does not close). A static Keystore failure (e.g. `IllegalStateException` from a broken provider) is converted to `CredentialStoreException` at the store's crypto boundary, not with a global `catch (Throwable)`; a failed save is **not** reported as successful and never leaves the key in plaintext, and a deletion that could not remove the file returns `false` instead of claiming it deleted. **Reads (2026-10):** reading is **asynchronous and off the calling thread**. `SettingsManager.readApiKey(executor, callback)` enqueues on the `credential-ops` lane (`CredentialOperations.submitValue`) the same path `getApiKey()` used to take — on-disk state + `CredentialRead` — and delivers an `ApiKeyRead` (`LOADED` / `ABSENT` / `UNREADABLE`) via callback; `readPostProcessEnabled(executor, callback)` does the same for the switch. No caller performs credential I/O, tombstone reads, or AndroidKeyStore decryption on its own thread (the main thread for every UI surface). The synchronous accessors (`getApiKey`, `isPostProcessEnabled`, `isPostProcessConfigured`) were removed; `isPostProcessSwitchedOn()` remains as a **cheap** probe (marker + provider available, no credential I/O) to decide whether post-processing is worth requesting, leaving the credential verdict to `PostProcessor`, which reads in order before the request: a still-running legacy import is never read as "not configured", and an unread credential (UNREADABLE) is reported as such instead of as absent — in both cases without touching the network (the raw transcript is still delivered, exactly once). The read goes **before** the request, so no network call ever uses a credential from another queue state, and a surface destroyed mid-read (the async callback arrives late) no longer fires the request: `PostProcessor` checks the lifecycle validator before enqueueing on OkHttp. `CredentialRead` (pure, covered by `CredentialReadTest`) decides nothing on its own: it only receives the on-disk state. The `deleted` tombstone **overrides every source**, so a deletion is visible to any reader from the instant it is written — `forget()` writes it **before** deleting anything (it used to write it after, and in that window the store was gone but the Base64 marker was still there: a read returned the key the user had just deleted); and since the tombstone also wins when a copy could not be removed, a deleted key cannot be read from either the surviving store or a legacy copy. Ordering between reads and mutations is **by successful completion, not by enqueueing**: an in-flight mutation is not yet visible (defined and documented state), which is why every caller that must observe its own mutation waits for the completion callback — the settings screen does so on save, on model-list refresh, and on connection test — instead of re-reading; a caller waiting on a specific read enqueues it **after** its mutation, so the lane runs it behind and observes its result; conversely, `store()` clears the tombstone in the same operation as the verified write, so a new key is not hidden by an earlier deletion, and `migrate()` finding a tombstone **finishes the deletion** instead of treating the decryptable store as "the user saved a new key". Only Java reads the key (OkHttp `Authorization` header); **Rust has no reference to it**. Encryption at rest protects against offline extraction of the app's data; it does NOT protect on a rooted/compromised device while the app is using it (the key must exist in memory to build the request) — see the threat model in the `SecureCredentialStore` header. Deleting the marker does not guarantee physical erasure on flash (FTL/wear-levelling).
 
-### 4.6 Mapping Rust ↔ Java (mapping de módulos para agentes)
+### 4.6 Rust ↔ Java module mapping (module mapping for agents)
 
-El árbol de carpetas está en [`README.md` §Project Structure](README.md#project-structure).
-Esta tabla mapea **qué módulo Rust ↔ qué componente Java ↔ dónde se invoca al
-engine compartido** — la información que un agente necesita pero el README no
-cubre.
+The folder tree lives in [`README.md` §Project Structure](README.md#project-structure).
+This table maps **which Rust module ↔ which Java component ↔ where the shared
+engine is invoked** — the information an agent needs but the README does not
+cover.
 
-| Módulo Rust (`src/<mod>.rs`) | Componente Java | Llama al engine desde | Particularidades (AGENT-ONLY) |
+| Rust module (`src/<mod>.rs`) | Java component | Invokes the engine from | Particulars (AGENT-ONLY) |
 |---|---|---|---|
-| `lib.rs` | — | — | `pub mod` raíz. Cualquier módulo nuevo debe declararse aquí. |
-| `engine.rs` | (singleton global) | `voice_session.rs`, `subtitle.rs` (worker), `recog_service.rs` (audio callback), `main_activity.rs` (benchmark) | `ensure_loaded_from_thread` coordina con `Condvar`; **idioma se re-lee en cada `run`** (no cachear). |
-| `audio.rs` | — | `engine.rs` (`find_quietest_split`) | Utilidad pura, sin JNI. |
-| `voice_session.rs` | `RecognizeActivity`, `RustInputMethodService` | vía JNI callback `onTextTranscribed(text)` | Comparte `cpal::Stream` entre las dos surfaces; auto-stop propio. |
-| `subtitle.rs` | `LiveSubtitleService` | vía JNI callback `onSubtitleText(text, isFinal)` | Pipeline partial/final con merging; lag-policies calibradas (ver §4.8). |
-| `recog_service.rs` | `VoiceRecognitionService` | síncrono en `audio_callback` | Endpointing con VAD silencioso; sin auto-stop (lo gestiona el monitor). |
-| `ime.rs` | `RustInputMethodService` | thin bridge → `voice_session` | Llamadas JNI: `init/cleanup` + `start/stop/cancel` Recording. |
-| `recognize.rs` | `RecognizeActivity` | thin bridge → `voice_session` | Idéntico a `ime.rs` pero con `jboolean auto_stop` en `startRecording`. |
-| `main_activity.rs` | `MainActivity` | benchmark + status notifier | `initNative`, `benchmarkNative`; cachea samples en `Vec<f32>` desde `bench.wav`. |
-| `models.rs` | `ModelsActivity` | reload engine vía `engine::reset()` | Importa GGUF a `filesDir/models/<nombre>`. |
-| `transcribe_file.rs` | `TranscribeFileActivity` | una sola `transcribe_shared` | Comparte audio desde `Intent.ACTION_SEND/VIEW` (`audio/*`). |
-| `corrector.rs` | (`CustomWordsActivity` escribe el marker file) | vía `engine::transcribe_shared` (post-ASR, pre-callback) | Corrección fonética post-ASR: lee `filesDir/custom_words`, codifica cada palabra del transcript y los términos del diccionario con un codificador fonético ES+EN, reemplaza palabras mal reconocidas por la más cercana (Levenshtein ≤ 2 sobre claves fonéticas + tiebreak coseno de bigramas). Safe-fallback: cualquier fallo (sin diccionario, I/O error, panic) devuelve el texto crudo. Ejecuta dentro de su propio `catch_unwind` para no congelar el IME. Cubre TODAS las superficies (IME, popup, subtítulos, SpeechRecognizer, archivo) de golpe. |
-| `assets.rs` | (interno) | `engine.rs` (`do_load`) | Extrae el modelo bundled desde assets al primer arranque; `invalidate_builtin_model` borra extraídos corruptos. |
+| `lib.rs` | — | — | Root `pub mod`. Any new module must be declared here. |
+| `engine.rs` | (global singleton) | `voice_session.rs`, `subtitle.rs` (worker), `recog_service.rs` (audio callback), `main_activity.rs` (benchmark) | `ensure_loaded_from_thread` coordinates with `Condvar`; **language is re-read on every `run`** (do not cache). |
+| `audio.rs` | — | `engine.rs` (`find_quietest_split`) | Pure utility, no JNI. |
+| `voice_session.rs` | `RecognizeActivity`, `RustInputMethodService` | via JNI callback `onTextTranscribed(text)` | Shares one `cpal::Stream` between both surfaces; own auto-stop. |
+| `subtitle.rs` | `LiveSubtitleService` | via JNI callback `onSubtitleText(text, isFinal)` | Partial/final pipeline with merging; calibrated lag policies (see §4.8). |
+| `recog_service.rs` | `VoiceRecognitionService` | synchronously in `audio_callback` | Endpointing with silent VAD; no auto-stop (the monitor owns it). |
+| `ime.rs` | `RustInputMethodService` | thin bridge → `voice_session` | JNI calls: `init/cleanup` + `start/stop/cancel` Recording. |
+| `recognize.rs` | `RecognizeActivity` | thin bridge → `voice_session` | Identical to `ime.rs` but with `jboolean auto_stop` in `startRecording`. |
+| `main_activity.rs` | `MainActivity` | benchmark + status notifier | `initNative`, `benchmarkNative`; caches samples in a `Vec<f32>` from `bench.wav`. |
+| `models.rs` | `ModelsActivity` | engine reload via `engine::reset()` | Imports GGUF into `filesDir/models/<name>`. |
+| `transcribe_file.rs` | `TranscribeFileActivity` | a single `transcribe_shared` | Shares audio from `Intent.ACTION_SEND/VIEW` (`audio/*`). |
+| `corrector.rs` | (`CustomWordsActivity` writes the marker file) | via `engine::transcribe_shared` (post-ASR, pre-callback) | Post-ASR phonetic correction: reads `filesDir/custom_words`, encodes every transcript word and dictionary term with an ES+EN phonetic encoder (seseo/yeísmo, `ñ`→`ny`), replaces misrecognized words with the closest term (Levenshtein ≤ 2 over phonetic keys + bigram-cosine tiebreak). Safe fallback: any failure (no dictionary, I/O error, panic) returns the raw text. Runs inside its own `catch_unwind` so it never freezes the IME. Covers ALL surfaces (IME, popup, subtitles, SpeechRecognizer, file) in one shot. |
+| `assets.rs` | (internal) | `engine.rs` (`do_load`) | Extracts the bundled model from APK assets on first start; `invalidate_builtin_model` deletes corrupt extractions. |
 
-**Regla modular:** mover lógica entre módulos exige actualizar también
-`AndroidManifest.xml` (registro de activities/services) y `lib.rs` (`pub mod`).
-No renombrar archivos Rust/Java sin actualizar la entrada JNI (§4.3).**Post-procesado AI (fork addition, Java-only — contrato AGENT-ONLY):**
-- **`pp_default_prompt` es una sola línea con escapes `\n`.** AAPT2 **colapsa los saltos de línea
-  literales** de un `<string>` a un solo espacio (verificado con `aapt2 dump strings`). Un valor
-  multilínea se rompe en runtime: el campo de `PostProcessSettingsActivity` muestra todo junto
-  y el payload enviado al LLM es un muro plano — esa fue la causa del "prompt juntado" y de que el
-  LLM no refinara el texto. Usa `\n` (y `\n\n` para párrafos en blanco) dentro del valor.
-- **El transcript no se manda dos veces.** Si el prompt activo contiene `${output}`, el texto
-  crudo se inyecta en el system prompt y el `user message` pasa a ser el marcador fijo
-  `"Apply the instructions to the transcript above."`. Si NO hay `${output}`, el texto viaja en
-  el user message. No duplicarlo (flag `injected` en `process()` de `PostProcessor.java`):
-  mandarlo dos veces hace que el LLM devuelva la entrada sin refinar.
-- **Post-procesado final-only:** el streaming del transcriptor (`onPartialText`) es únicamente
-  una previsualización visual. Cuando llega `onTextTranscribed`, se manda el texto final una
-  sola vez mediante `process()` con una respuesta JSON completa (`stream` no se envía), y el
-  editor recibe un único `commitText` con el resultado refinado. Si el postprocesado está
-  desactivado, se comete el texto ASR directamente; si la llamada falla, se cancela o devuelve
-  una respuesta vacía/no válida, siempre se comete el texto crudo. Así se evita pegar tokens
-  parciales, duplicados o texto "Frankenstein" y se conserva la fluidez del streaming ASR.
-- **Cancelación/lifecycle:** la cancelación es **por propietario** (`PostProcessor.cancelAllFor(owner)`, identidad de la Activity/Service dueña de la llamada; registro en `CallRegistry`): destruir una superficie o cancelar un reconocimiento nunca cancela una petición legítima de otra superficie. `PostProcessor.cancelAll()` (global) queda reservado para eventos realmente globales: toggle PP-off (con broadcast `CANCEL_ACTION`, que el IME escucha) y muerte del servicio IME. Los validadores de Activity/IME impiden callbacks tardíos sobre componentes destruidos, y el `Response` de OkHttp se cierra siempre, incluidos errores y parseos fallidos.
-- **Traducción de subtítulos (fork addition, contrato AGENT-ONLY):** el modelo bundled (Nemotron) **no traduce**; la traducción es una etapa Java-side exclusiva de subtítulos sobre segmentos **finalizados** (`LiveSubtitleService` + `OnDeviceSubtitleTranslator` con ML Kit). El destino vive en el marker `subtitle_translation_target` (`auto` = idioma original; locale fijo = traducir) y lo lee el servicio al iniciar sesión — **no** reutilizar `model_translate` (eso es ASR-global y **nunca** debe aplicar a subtítulos: `engine::transcribe_subtitle` fuerza `Task::Transcribe`). Cola FIFO serial (máx. 8), resultados aplicados en orden en main thread, fallback **siempre** al texto original (sin Play Services, sin paquete, error, saturación), generación de sesión para callbacks tardíos, y origen automático resuelto por script del texto (`SourceLanguageResolver`) cuando `model_language` no es fijo.
+**Modular rule:** moving logic between modules also requires updating
+`AndroidManifest.xml` (activity/service registration) and `lib.rs` (`pub mod`).
+Do not rename Rust/Java files without updating the JNI entry (§4.3).**AI post-processing (fork addition, Java-only — AGENT-ONLY contract):**
+- **`pp_default_prompt` is a single line with `\n` escapes.** AAPT2 **collapses literal
+  newlines** in a `<string>` into a single space (verified with `aapt2 dump strings`). A
+  multiline value breaks at runtime: the `PostProcessSettingsActivity` field shows everything
+  joined and the payload sent to the LLM is a flat wall — that was the cause of the "joined
+  prompt" bug and the LLM not refining the text. Use `\n` (and `\n\n` for blank paragraphs)
+  inside the value.
+- **The transcript is never sent twice.** If the active prompt contains `${output}`, the raw
+  text is injected into the system prompt and the `user message` becomes the fixed marker
+  `"Apply the instructions to the transcript above."`. If there is NO `${output}`, the text
+  travels in the user message. Do not duplicate it (`injected` flag in `PostProcessor.java`'s
+  `process()`): sending it twice makes the LLM return the input unrefined.
+- **Final-only post-processing:** the transcriber streaming (`onPartialText`) is only a
+  visual preview. When `onTextTranscribed` arrives, the final text is sent exactly once via
+  `process()` with a complete JSON response (`stream` is not sent), and the editor receives
+  a single `commitText` with the refined result. If post-processing is off, the raw ASR text
+  is committed directly; if the call fails, is cancelled, or returns an empty/invalid
+  response, the raw text is always committed. This avoids pasting partial tokens, duplicates,
+  or "Frankenstein" text while keeping ASR streaming fluid.
+- **Cancellation/lifecycle:** cancellation is **per owner** (`PostProcessor.cancelAllFor(owner)`, identity of the Activity/Service owning the call; tracked in `CallRegistry`): destroying a surface or cancelling a recognition never cancels another surface's legitimate request. `PostProcessor.cancelAll()` (global) is reserved for truly global events: PP-off toggle (with the `CANCEL_ACTION` broadcast, which the IME listens to) and IME service death. Activity/IME validators prevent late callbacks on destroyed components, and the OkHttp `Response` is always closed, including errors and failed parses.
+- **Subtitle translation (fork addition, AGENT-ONLY contract):** the bundled model (Nemotron) does **not** translate; translation is a Java-side subtitle-only stage over **finalized** segments (`LiveSubtitleService` + `OnDeviceSubtitleTranslator` with ML Kit). The target lives in the `subtitle_translation_target` marker (`auto` = original language; fixed locale = translate) and the service reads it at session start — do **not** reuse `model_translate` (that is ASR-global and must **never** apply to subtitles: `engine::transcribe_subtitle` forces `Task::Transcribe`). Serial FIFO queue (max 8), results applied in order on the main thread, always falling back to the original text (no Play Services, no pack, error, saturation), session generation for late callbacks, and automatic source resolved from the text's script (`SourceLanguageResolver`) when `model_language` is not fixed.
 
-### 4.7 Rust: contratos del singleton Engine (no romper)
+### 4.7 Rust: Engine singleton contracts (do not break)
 
-- **`engine::get_engine()` → `Option<Arc<Mutex<Engine>>>`**: compartido por todos los componentes Java (un único proceso). Garantías: panic-catching, recovery de Mutex poison.
-- **`engine::ensure_loaded*`**: idempotente, multi-thread safe, espera via `Condvar` si otra thread está cargando, reintenta tras `Failed(_)`.
-- **`Engine::transcribe`** divide audio largo en el punto más silencioso (`audio::find_quietest_split`); une los textos con un espacio.
-- **`Engine::run` re-lee `model_language` en CADA llamada** (issue v0.1.20→21). Esto es lo que hace que el cambio de idioma en el spinner de `ModelsActivity` aplique al instante en todas las superficies (incluido el IME, que puede estar vivo antes que la Activity) sin recarga manual del modelo. **No cachear el idioma dentro del Engine** — ese fue el bug original.
+- **`engine::get_engine()` → `Option<Arc<Mutex<Engine>>>`**: shared by all Java components (a single process). Guarantees: panic catching, poisoned-Mutex recovery.
+- **`engine::ensure_loaded*`**: idempotent, multi-thread safe, waits via `Condvar` while another thread loads, retries after `Failed(_)`.
+- **`Engine::transcribe`** splits long audio at the quietest point (`audio::find_quietest_split`); joins the texts with a space.
+- **`Engine::run` re-reads `model_language` on EVERY call** (v0.1.20→21 issue). That is what makes the language change in the `ModelsActivity` spinner apply instantly on every surface (including the IME, which may be alive before the Activity) with no manual model reload. **Do not cache the language inside the Engine** — that was the original bug.
 
-### 4.8 Subtítulos: pipeline con coste predecible
+### 4.8 Subtitles: predictable-cost pipeline
 
-`src/subtitle.rs` es probablemente el código más sutil. Reglas:
+`src/subtitle.rs` is probably the subtlest code. Rules:
 
-- **Parciales:** sólo se encolan si (a) worker ocioso, (b) sin pendientes finales, (c) `segment_secs * rtf <= MAX_PARTIAL_COST_SECS` (latest-wins). Si el dispositivo transcribe más lento que el audio, las parciales se cortan — es por diseño.
-- **Finales:** siempre se encolan (FIFO), *pero* se pliegan con `try_recv` hasta `MAX_MERGED_SAMPLES` (25 s) para amortiguar la ventana fija de Whisper.
-- **Lag-policies (importantes, no subir los umbrales a la ligera):**
-  - `MAX_FINAL_LAG_SAMPLES = 8 s` → drop con `"…"` gap.
-  - `MAX_PARTIAL_LAG_SAMPLES = 3 s` → descartar.
-  - `MAX_PARTIAL_COST_SECS = 2.0` → toggle on/off de parciales por coste.
-- La fusión de finales es lo que permite a un dispositivo lento seguir el ritmo real sin perder texto. Si lo eliminas, la latencia crece sin cota.
+- **Partials:** only enqueued when (a) worker idle, (b) no pending finals, (c) `segment_secs * rtf <= MAX_PARTIAL_COST_SECS` (latest-wins). If the device transcribes slower than the audio, partials are cut — by design.
+- **Finals:** always enqueued (FIFO), *but* folded with `try_recv` up to `MAX_MERGED_SAMPLES` (25 s) to cushion Whisper's fixed window.
+- **Lag policies (important, do not raise these thresholds lightly):**
+  - `MAX_FINAL_LAG_SAMPLES = 8 s` → drop with a `"…"` gap.
+  - `MAX_PARTIAL_LAG_SAMPLES = 3 s` → discard.
+  - `MAX_PARTIAL_COST_SECS = 2.0` → cost-based partials on/off toggle.
+- Merging finals is what lets a slow device keep up with real time without losing text. Remove it and latency grows unbounded.
 
-### 4.9 Java UI: convenciones observables
+### 4.9 Java UI: observable conventions
 
-- **Tema base:** `Theme.Material3.DayNight.NoActionBar` + `DynamicColors.applyToActivitiesIfAvailable(this)` en `App.onCreate` (Material You desde Android 12+). El `AppTheme` **no sobrescribe ningún color**: se usa el esquema tonal de Material 3 tal cual (antes se pisaban sólo `colorPrimary`/`colorOnPrimary`, lo que dejaba el resto de roles en la baseline y producía una paleta a medias). Todas las superficies usan atributos `?attr/color*`; **no añadir literales hex** a layouts ni drawables. Las únicas excepciones documentadas son los tokens semánticos sin rol M3 (`status_ok`) y los scrims de los overlays que se dibujan sobre contenido de terceros (`subs_scrim*`, `overlay_scrim*`), que a propósito mantienen el mismo valor en claro y oscuro.
-- **Targets táctiles:** mínimo **48dp × 48dp** efectivos en todo control interactivo (las teclas del IME, cerrar, cancelar, overlay, subtítulos). El glifo puede seguir a 24dp; el contenedor no. No usar `android:minWidth/minHeight="0dp"` para encoger un botón por debajo del mínimo.
-- **IME:** `RustInputMethodService` no es `AppCompatActivity` (es un `InputMethodService`, en el mismo proceso que el resto de la app). Construye su propio contexto theme-aware con `ThemePrefs.wrapForNight` + `DynamicColors.wrapContextIfAvailable` para que la vista coincida con el ajuste de tema de la app principal.
-- **Pantalla de voz (popup):** `AppTheme.VoicePanel` translúcido — NO pantalla completa — para que la app que invocó la voz conserve su UI detrás.
-- **Estado interno del engine (`"Loading"`, `"Initializing"`, `"Waiting"`) NO se muestra al usuario:** la UI mapea siempre a `Tap to Record`, `Listening...`, `Processing...`, etc. (ver `updateUiState` en `RustInputMethodService`).
-- **Pantallas han de re-pintar en cambios de tema** (ej. IME reconstruye su `inputView` si `ThemePrefs.isNight` cambia desde `onStartInputView`).
-- **Botón Cancelar del IME (`ime_cancel`):** visible durante la grabación (descarta la captura antes de transcribir/postprocesar, evitando consumo de API) y durante toda la ventana `resultPending` (desde que se suelta el micrófono hasta el commit/cancel). `resultPending` en `RustInputMethodService` es la **única fuente de verdad** en `updateRecordButtonUI(false)`; **no reintroducir** checks de `lastStatus` (Transcribing/Processing) en esa rama — un `"Processing..."` stale re-mostraría el botón tras el commit (parpadeo). Toda ruta de stop (mic, auto-stop, switch de teclado) activa `resultPending` de forma síncrona; la limpian commit, cancel, texto vacío, `stop_on_hide`, error terminal y el receiver `CANCEL_PP`; una grabación nueva la resetea.
+- **Base theme:** `Theme.Material3.DayNight.NoActionBar` + `DynamicColors.applyToActivitiesIfAvailable(this)` in `App.onCreate` (Material You from Android 12+). `AppTheme` **overrides no color**: the Material 3 tonal scheme is used as-is (it used to override only `colorPrimary`/`colorOnPrimary`, leaving the remaining roles on baseline and producing a half-applied palette). Every surface uses `?attr/color*` attributes; **do not add hex literals** to layouts or drawables. The only documented exceptions are semantic tokens with no M3 role (`status_ok`) and overlay scrims drawn over third-party content (`subs_scrim*`, `overlay_scrim*`), which deliberately keep the same value in light and dark.
+- **Touch targets:** effective minimum **48dp × 48dp** on every interactive control (IME keys, close, cancel, overlay, subtitles). The glyph may stay 24dp; the container may not. Do not use `android:minWidth/minHeight="0dp"` to shrink a button below the minimum.
+- **IME:** `RustInputMethodService` is not an `AppCompatActivity` (it is an `InputMethodService`, in the same process as the rest of the app). It builds its own theme-aware context with `ThemePrefs.wrapForNight` + `DynamicColors.wrapContextIfAvailable` so the view matches the main app's theme setting.
+- **Voice screen (popup):** translucent `AppTheme.VoicePanel` — NOT fullscreen — so the invoking app keeps its UI behind.
+- **Internal engine state (`"Loading"`, `"Initializing"`, `"Waiting"`) is NEVER shown to the user:** the UI always maps to `Tap to Record`, `Listening...`, `Processing...`, etc. (see `updateUiState` in `RustInputMethodService`).
+- **Screens must repaint on theme changes** (e.g. the IME rebuilds its `inputView` if `ThemePrefs.isNight` changed since `onStartInputView`).
+- **IME Cancel button (`ime_cancel`):** visible during recording (discards the capture before transcribing/post-processing, avoiding API spend) and during the whole `resultPending` window (from mic release to commit/cancel). `resultPending` in `RustInputMethodService` is the **single source of truth** in `updateRecordButtonUI(false)`; **do not reintroduce** `lastStatus` (Transcribing/Processing) checks in that branch — a stale `"Processing..."` would re-show the button after commit (flicker). Every stop path (mic, auto-stop, keyboard switch) sets `resultPending` synchronously; commit, cancel, empty text, `stop_on_hide`, terminal error, and the `CANCEL_PP` receiver clear it; a new recording resets it.
 
 ### 4.10 i18n
 
-- **Todas las cadenas nuevas** → añadir en `app/src/main/res/values/strings.xml` y propagarlas a `values-es`, `values-de`, `values-fr`, `values-it`, `values-pt`, `values-ru`.
-- Si una cadena **no debe traducirse** (ej. prompt de sistema por defecto), usa `translatable="false"` (ver `pp_default_prompt`).
-- **Valores `<string>` multilínea:** AAPT2 colapsa los saltos de línea literales a un solo espacio. Si el texto debe verse/enviarse multi-parágrafo (caso `pp_default_prompt`), guarda el valor en UNA línea con escapes `\n` (`\n\n` = párrafo en blanco). Verificado con `aapt2 dump strings`; ver §4.6.
-- Si el orden de idioma importa (ej. ajustes que aparecen en una columna lateral con icono), respetar el orden existente en `MainActivity.bindMarkerSwitch`.
+- **Every new string** → add it in `app/src/main/res/values/strings.xml` and propagate to `values-es`, `values-de`, `values-fr`, `values-it`, `values-pt`, `values-ru`.
+- If a string must **not** be translated (e.g. default system prompt), use `translatable="false"` (see `pp_default_prompt`).
+- **Multiline `<string>` values:** AAPT2 collapses literal newlines into a single space. If the text must render/send multi-paragraph (the `pp_default_prompt` case), keep the value on ONE line with `\n` escapes (`\n\n` = blank paragraph). Verified with `aapt2 dump strings`; see §4.6.
+- If language order matters (e.g. settings appearing in a side column with an icon), respect the existing order in `MainActivity.bindMarkerSwitch`.
 
-### 4.11 Versión y release
+### 4.11 Version and release
 
-- **Bumps de versión:** editar `versionCode` **y** `versionName` en `app/build.gradle.kts`. `versionCode` siempre incremental.
-- **Notas de release (REGLA CLAVE):** `RELEASE_NOTES.md` contiene **únicamente las notas de la versión actual a publicar**, con una longitud obligatoria de **máximo entre 125 y 250 palabras** (el CI usa `body_path: RELEASE_NOTES.md` para `softprops/action-gh-release@v2`). No acumular historiales de versiones pasadas en este archivo (el registro histórico completo vive en `CHANGELOG.md`).
-- **APK y AAB se publican los dos, pero en invocaciones separadas.** El workflow de release construye ambos (`assembleRelease` → `Aura_Transcribe_vX.Y.Z.apk`; `bundleRelease` → `Aura_Transcribe_vX.Y.Z.aab`) y crea un único GitHub Release con los dos ficheros. Lo que **no** puede hacerse es pedirlos en la misma llamada de Gradle: el APK necesita el GGUF en el módulo base y el AAB sólo en el asset pack `:model_assets` (`dynamicDelivery` install-time, ver `model_assets/build.gradle.kts`), así que `app/build.gradle.kts` hace fallback añadiendo `model_assets/src/main/assets/` a `assets.srcDirs` solo cuando NO es bundle, y una invocación ambigua falla al configurar. Ver "Entrega del modelo bundled" en §3.
+- **Version bumps:** edit both `versionCode` **and** `versionName` in `app/build.gradle.kts`. `versionCode` always increments.
+- **Release notes (KEY RULE):** `RELEASE_NOTES.md` contains **only the notes for the version being published**, with a mandatory length of **at most 125–250 words** (CI uses `body_path: RELEASE_NOTES.md` for `softprops/action-gh-release@v2`). Do not accumulate past-version histories in this file (the full historical record lives in `CHANGELOG.md`).
+- **APK and AAB are both published, but in separate invocations.** The release workflow builds both (`assembleRelease` → `Aura_Transcribe_vX.Y.Z.apk`; `bundleRelease` → `Aura_Transcribe_vX.Y.Z.aab`) and creates a single GitHub Release with both files. What **cannot** be done is requesting both in the same Gradle call: the APK needs the GGUF in the base module and the AAB only in the `:model_assets` asset pack (`dynamicDelivery` install-time, see `model_assets/build.gradle.kts`), so `app/build.gradle.kts` falls back to adding `model_assets/src/main/assets/` to `assets.srcDirs` only when NOT a bundle, and an ambiguous invocation fails at configuration. See "Bundled model delivery" in §3.
 
 ---
 
-## 5. Reglas para Agentes de IA
+## 5. Rules for AI Agents
 
-### 5.1 EVITAR (cosas que romperían el proyecto)
+### 5.1 AVOID (things that would break the project)
 
-- ❌ **No cambiar la firma de los call-backs JNI** listados en §4.4 sin actualizar cada superficie Java (`RecognizeActivity`, `RustInputMethodService`, `LiveSubtitleService`, `VoiceRecognitionService`).
-- ❌ **No cachear el `model_language`** dentro de `Engine` o entre llamadas. El comportamiento intencional es leer el marker file en cada `Engine::run`, de modo que cambiar el idioma en `ModelsActivity` aplique de inmediato en todas las superficies (IME, popup, subtítulos, servicio) sin recargar el modelo. Ese fue el bug crítico de v0.1.20 → v0.1.21.
-- ❌ **No eliminar las dos capas de resiliencia** de `transcribe_shared` (`catch_unwind` + recuperación de Mutex envenenado). Si lo haces, un único panic deja el IME bloqueado en "Processing" hasta que muera el proceso.
-- ❌ **No añadir soporte para otras ABIs** (`armeabi-v7a`, `x86`, `x86_64`) sin revisar antes:
-  - `check_cpu_features` requiere dotprod+fp16 (ARMv8.2 ~2018+); cualquier dispositivo antiguo fallaría en medio de la inferencia con `SIGILL`.
-  - el ggml cross-compile con `GGML_CPU_ARM_ARCH=armv8.2-a+dotprod+fp16` está fijado en `app/build.gradle.kts`.
-- ❌ **No romper la verificación SHA-256** ni eliminar el marker de "modelo bundled" — protege contra apps que se actualizan con un modelo nuevo y mantienen el viejo en cache. La descarga runtime debug verifica el hash con `FileSha256` **antes** de escribir `active_model` (P0.3, implementado 2026-08-03); no degradar esa ruta a activación sin hash.
-- ❌ **No convertir la app a Kotlin** sin discutirlo antes. Es un proyecto Java a propósito (legado del upstream, evita overhead de KSP/codegen).
-- ❌ **No mover ajustes a `SharedPreferences`** sin migrar también los marker files consumidos por Rust (`model_language`, `model_translate`, `active_model`, `model_threads`). El código Rust solo lee del *filesystem*, no de prefs.
-- ❌ **No añadir dependencias síncronas bloqueantes** al evento del audio callback de `cpal` (en `voice_session.rs`/`recog_service.rs`). Toda escritura a `audio_buffer` debe ser O(1) bajo el mutex.
-- ❌ **No cambiar el orden de carga** de las librerías nativas (siempre `c++_shared` antes de `android_transcribe_app`) ni saltarse el `try/catch UnsatisfiedLinkError` — protege contra dispositivos/ABIs mal.
-- ❌ **No subir umbrales** de `MAX_FINAL_LAG_SAMPLES` / `MAX_PARTIAL_LAG_SAMPLES` / `MAX_PARTIAL_COST_SECS` en `subtitle.rs` sin probar hardware lento: esos números están calibrados para que un dispositivo medio no se quede atrás, no son free-tuning.
-- ❌ **No reemplazar `transcribe_shared` por código que ignore panics.** El `panic::catch_unwind` documenta un caso real: el modelo puede panic de fondo por allocations grandes, y el efecto sin catch sería un IME congelado.
-- ❌ **No romper el fallback del post-procesado:** si la llamada al LLM falla, siempre se entrega la transcripción cruda (`onError → deliverResult(text)`). Es la garantía de "no perder texto".
-- ❌ **No volver a leer la credencial de forma síncrona desde un hilo llamante (menos aún el main thread).** Nada de un `getApiKey()`/`isPostProcessConfigured()` síncrono: el I/O de fichero, la lectura de la lápida y el descifrado con AndroidKeyStore van en la lane `credential-ops` vía `SettingsManager.readApiKey`, que además es lo que ordena la lectura detrás de la importación legada de arranque. Una lectura **pendiente** no es una credencial ausente: no la reportes como «no configurado» ni lances la petición con una credencial de la nada.
-- ❌ **No escribir `pp_default_prompt` (ni ningún `<string>` largo) con saltos de línea literales.** AAPT2 los colapsa a un solo espacio: rompe la UI del prompt y aplana el payload que guía al LLM a refinar. Usa escapes `\n` (ver §4.6).
-- ❌ **No generar compilaciones de release firmadas fuera del pipeline oficial de GitHub Actions.** Las de depuración llegan al usuario vía GitHub Actions + bot de Telegram, y las firmadas vía `android_release.yml`. **Compilar en local para validar sí está permitido y es lo esperado** en un host de desarrollo real (portátil/escritorio), siempre que no se publique el artefacto ni se firmen releases a mano. Ver "Regla de validación por entorno" en §3.
-- ❌ **No borrar el comentario explicativo en app/build.gradle.kts sobre `assetPacks` + bundle-vs-APK.** Es la trampa que rompió v0.1.x del upstream y se documentó específicamente para evitar.
-- ❌ **No introducir tests automatizados que importen el módulo entero** a través de JNI en CI: no hay emulador arm64 en el runner de GitHub Actions. La validación en CI es build + lint + tests JVM; el smoke test funcional es manual en dispositivo. Los tests de instrumentación (si se añaden) se compilan pero **no** se ejecutan en CI.
+- ❌ **Do not change the JNI callback signatures** listed in §4.4 without updating every Java surface (`RecognizeActivity`, `RustInputMethodService`, `LiveSubtitleService`, `VoiceRecognitionService`).
+- ❌ **Do not cache `model_language`** inside `Engine` or across calls. The intentional behavior is reading the marker file on every `Engine::run`, so changing the language in `ModelsActivity` applies instantly on every surface (IME, popup, subtitles, service) without a model reload. That was the critical v0.1.20 → v0.1.21 bug.
+- ❌ **Do not remove the two resilience layers** of `transcribe_shared` (`catch_unwind` + poisoned-Mutex recovery). Doing so leaves the IME stuck on "Processing" after a single panic until the process dies.
+- ❌ **Do not add support for other ABIs** (`armeabi-v7a`, `x86`, `x86_64`) without reviewing first:
+  - `check_cpu_features` requires dotprod+fp16 (ARMv8.2 ~2018+); any older device would fail mid-inference with `SIGILL`.
+  - the ggml cross-compile with `GGML_CPU_ARM_ARCH=armv8.2-a+dotprod+fp16` is pinned in `app/build.gradle.kts`.
+- ❌ **Do not break SHA-256 verification** or remove the "bundled model" marker — it protects against apps updating to a new model while keeping the old one cached. The debug runtime download verifies the hash with `FileSha256` **before** writing `active_model` (P0.3, implemented 2026-08-03); do not degrade that path to hash-less activation.
+- ❌ **Do not convert the app to Kotlin** without discussing it first. It is a Java project on purpose (upstream legacy, avoids KSP/codegen overhead).
+- ❌ **Do not move settings to `SharedPreferences`** without also migrating the marker files consumed by Rust (`model_language`, `model_translate`, `active_model`, `model_threads`). Rust code only reads from the *filesystem*, not prefs.
+- ❌ **Do not add blocking synchronous dependencies** to the `cpal` audio-callback event (in `voice_session.rs`/`recog_service.rs`). Every write to `audio_buffer` must be O(1) under the mutex.
+- ❌ **Do not change the native library load order** (always `c++_shared` before `android_transcribe_app`) or skip the `try/catch UnsatisfiedLinkError` — it guards against broken devices/ABIs.
+- ❌ **Do not raise the thresholds** `MAX_FINAL_LAG_SAMPLES` / `MAX_PARTIAL_LAG_SAMPLES` / `MAX_PARTIAL_COST_SECS` in `subtitle.rs` without testing slow hardware: those numbers are calibrated so an average device does not fall behind, they are not free tuning.
+- ❌ **Do not replace `transcribe_shared` with code that ignores panics.** The `panic::catch_unwind` documents a real case: the model can panic in the background over large allocations, and without the catch the effect would be a frozen IME.
+- ❌ **Do not break the post-processing fallback:** if the LLM call fails, the raw transcript is always delivered (`onError → deliverResult(text)`). That is the "never lose text" guarantee.
+- ❌ **Do not read the credential synchronously from a calling thread again (least of all the main thread).** No synchronous `getApiKey()`/`isPostProcessConfigured()`: file I/O, tombstone reads, and AndroidKeyStore decryption belong on the `credential-ops` lane via `SettingsManager.readApiKey`, which is also what orders the read behind the startup legacy import. A **pending** read is not an absent credential: do not report it as "not configured" (ES locale: «no configurado») or fire the request with a credential out of thin air.
+- ❌ **Do not write `pp_default_prompt` (or any long `<string>`) with literal newlines.** AAPT2 collapses them into a single space: it breaks the prompt UI and flattens the payload guiding the LLM to refine. Use `\n` escapes (see §4.6).
+- ❌ **Do not produce signed release builds outside the official GitHub Actions pipeline.** Debug builds reach the user via GitHub Actions + Telegram bot, signed ones via `android_release.yml`. **Building locally to validate is allowed and expected** on a real dev host (laptop/desktop), as long as the artifact is not published and releases are not hand-signed. See "Environment-based validation rule" in §3.
+- ❌ **Do not delete the explanatory comment in app/build.gradle.kts about `assetPacks` + bundle-vs-APK.** It is the trap that broke upstream v0.1.x and was documented specifically to avoid it.
+- ❌ **Do not introduce automated tests importing the whole module** through JNI in CI: there is no arm64 emulator on the GitHub Actions runner. CI validation is build + lint + JVM tests; the functional smoke test is manual on device. Instrumentation tests (if added) compile but are **not** run in CI.
 
-### 5.2 HACER (reglas positivas al añadir código)
+### 5.2 DO (positive rules for new code)
 
-- ✅ Si añades un call-back JNI nuevo, documéntalo con la firma exacta en este `AGENTS.md` (§4.4) y añade un stub no-op en Java por defecto para no romper builds en los que aún no has cableado el lado Java.
-- ✅ Cada nuevo ajuste del usuario va como **marker file en `filesDir()`**, sin excepción. **La API key es la única excepción al formato plano**: se persiste cifrada vía `SecureCredentialStore` (AES-256-GCM + AndroidKeyStore); no usar Base64 como "protección" ni escribir jamás la clave en claro como fallback si el Keystore falla (`setApiKey` entrega `false` por callback y la UI lo muestra, sin cerrar la pantalla ni fingir que guardó). Toda escritura de la clave va por la lane `CredentialOperations` (§4.5); no escribir el marker cifrado desde fuera de esa lane. Un ajuste nuevo no sensible sigue siendo un marker simple.
-- ✅ Toda escritura de markers pasa por `MarkerFileHelper` (temp **único por escritura** + fsync + rename; delete en vacío). Nunca `FileOutputStream` directo sobre el nombre final: escritores concurrentes que compartan el mismo `*.tmp` pueden exponer contenido parcial (cazado por `MarkerAtomicityTest`). Hay varios componentes (Activity, IME, servicios) que escriben los mismos ajustes, así que sigue siendo obligatorio aunque todo corra en un solo proceso.
-- ✅ Antes de añadir cadenas visibles, duplicarlas en los 7 locales. Si añades una cadena que **no** quieres traducir, márcala con `translatable="false"`.
-- ✅ Si tocas el `Engine`, lee primero `src/engine.rs` completo (~370 líneas, muy comentado): decisiones sobre warm-up, re-read de idioma, fallback a modelo bundled, warnings de capabilities (`supports_translate`/`variant().contains("turbo")`), Whisper `temperature_inc`, todo está allí por una razón documentada.
-- ✅ Si añades un nuevo surface (Activity/Service), recuerda:
-  1. Bloque `static` con `c++_shared` + `android_transcribe_app`.
-  2. Método nativo declarado en Java + implementación en Rust con prefijo `Java_dev_notune_transcribe_<ClassName>_`.
-  3. Llamadas JNI con `get_java_vm`, `new_global_ref` y release apropiado en `cleanupNative`.
-  4. Los ajustes van por marker files (nunca `SharedPreferences`), porque el motor Rust los lee del *filesystem*. **No** añadas `android:process`: la app es de un solo proceso a propósito (§1).
-- ✅ Si añades un modelo bundled:
-  1. Subir el SHA-256 real, **no** inventar uno.
-  2. Sumar el `ModelFile` en `modelPackFiles` (`app/build.gradle.kts`).
-  3. Si el modelo es > 200 MB, mantener `model_assets` como asset pack.
-- ✅ Si modificas la lógica de carga de Rust:
-  - Los `outputs.upToDateWhen { false }` están puestos **a propósito** (el incremental de Cargo es fiable, los inputs/outputs de Gradle no).
-  - El shim de `libpthread.a` y la librería `c++_shared` dinámica son **necesarios para el build Android**. Ver comentario en `build.rs`.
-- ✅ Si tocas el benchmark, lee primero los comentarios de `MainActivity.runBenchmark`/`readWavAsset` (sólo admite 16 kHz mono 16-bit PCM).
-- ✅ Bump de versión: `versionCode` siempre +1 sobre el actual; `versionName` semver-friendly; añadir entrada en cabecera de `RELEASE_NOTES.md` (no al final).
-- ✅ Si rompes un idioma o un locale: la app **transcribe en el dispositivo-locale por defecto** (`App.applyDeviceLanguageIfUnset`) y es opt-out. Cualquier override del usuario debe respetar ese comportamiento (ver `ModelsActivity` + `engine::run`).
-- ✅ Si añades una dependencia Gradle: respeta el bloque `constraints` que alinea `kotlin-stdlib-jdk7/jdk8` a `1.8.22`. Sin esa alineación, builds nuevos rompen con `Duplicate class` por culpa del legacy transitivo de Material.
-- ✅ Si modificas el flujo de subtítulos, preserva el contrato de `onSubtitleText(text, isFinal)`: `isFinal=true` appendea, `isFinal=false` reemplaza hipótesis parcial dentro de la misma ventana.
-- ✅ Si tocas el streaming cache-aware (`run_stream`/`transcribe_stream_shared` en `engine.rs`), preserva: (a) el retry de `att_context_right` fuera del menú del GGUF con el default del modelo (`Error::InvalidArgument` → reintento con `None`), (b) la degradación de hint de idioma, y (c) la telemetría de sesión en el log de Stop (`rtf`, nº de parciales, cadencia media, `att_context_right`) — es la única forma de medir el trade-off WER vs fluidez en dispositivo real vía logcat. Referencia del trade-off publicado: chunks {1120, 560, 320, 160, 80} ms con WER FLEURS a 1.12 s de en 7.91 / es 4.11 / fr 9.03 / it 4.25 / pt 5.48 / de 8.31; la card afirma precisión "competitiva" incluso a 80 ms.
-- ✅ No añadas `unsafe` Rust innecesario fuera de los entry points JNI (`#[no_mangle] pub unsafe extern "system" fn Java_…`).
+- ✅ When adding a new JNI callback, document it with its exact signature in this `AGENTS.md` (§4.4) and add a default no-op stub in Java so builds where the Java side is not wired yet do not break.
+- ✅ Every new user setting goes as a **marker file in `filesDir()`**, no exceptions. **The API key is the only exception to the plain format**: it persists encrypted via `SecureCredentialStore` (AES-256-GCM + AndroidKeyStore); do not use Base64 as "protection" and never write the key in plaintext as a fallback when Keystore fails (`setApiKey` delivers `false` via callback and the UI shows it, without closing the screen or pretending it saved). Every key write goes through the `CredentialOperations` lane (§4.5); do not write the encrypted marker from outside that lane. A new non-sensitive setting is still a plain marker.
+- ✅ Every marker write goes through `MarkerFileHelper` (per-write **unique** temp + fsync + rename; delete on empty). Never a direct `FileOutputStream` on the final name: concurrent writers sharing the same `*.tmp` can expose partial content (caught by `MarkerAtomicityTest`). Several components (Activity, IME, services) write the same settings, so this stays mandatory even though everything runs in one process.
+- ✅ Before adding visible strings, duplicate them across all 7 locales. To add a string you do **not** want translated, mark it `translatable="false"`.
+- ✅ Before touching the `Engine`, first read `src/engine.rs` in full (~370 lines, heavily commented): warm-up decisions, language re-read, bundled-model fallback, capability warnings (`supports_translate`/`variant().contains("turbo")`), Whisper `temperature_inc` — everything is there for a documented reason.
+- ✅ When adding a new surface (Activity/Service), remember:
+  1. `static` block with `c++_shared` + `android_transcribe_app`.
+  2. Native method declared in Java + Rust implementation with the `Java_dev_notune_transcribe_<ClassName>_` prefix.
+  3. JNI calls with `get_java_vm`, `new_global_ref`, and proper release in `cleanupNative`.
+  4. Settings go through marker files (never `SharedPreferences`), because the Rust engine reads them from the *filesystem*. Do **not** add `android:process`: the app is single-process on purpose (§1).
+- ✅ When adding a bundled model:
+  1. Upload the real SHA-256, **never** invent one.
+  2. Add the `ModelFile` to `modelPackFiles` (`app/build.gradle.kts`).
+  3. If the model is > 200 MB, keep `model_assets` as an asset pack.
+- ✅ When changing the Rust load logic:
+  - The `outputs.upToDateWhen { false }` are there **on purpose** (Cargo's incrementality is trustworthy, Gradle's inputs/outputs are not).
+  - The `libpthread.a` shim and the dynamic `c++_shared` library are **required for the Android build**. See the comment in `build.rs`.
+- ✅ Before touching the benchmark, first read the `MainActivity.runBenchmark`/`readWavAsset` comments (16 kHz mono 16-bit PCM only).
+- ✅ Version bump: `versionCode` always +1 over current; `versionName` semver-friendly; add entry at the top of `RELEASE_NOTES.md` (not at the end).
+- ✅ If you break a language or locale: the app **transcribes in the device locale by default** (`App.applyDeviceLanguageIfUnset`) and it is opt-out. Any user override must respect that behavior (see `ModelsActivity` + `engine::run`). Spanish (`es-ES`) and the other 6 locales are first-class: the ES+EN phonetic encoder, the BCP-47 locale list, and the per-language WER trade-off below exist so transcription quality never silently regresses for non-English users.
+- ✅ When adding a Gradle dependency: respect the `constraints` block pinning `kotlin-stdlib-jdk7/jdk8` to `1.8.22`. Without that alignment, new builds break with `Duplicate class` from transitive Material legacy.
+- ✅ When changing the subtitle flow, preserve the `onSubtitleText(text, isFinal)` contract: `isFinal=true` appends, `isFinal=false` replaces the partial hypothesis within the same window.
+- ✅ When touching cache-aware streaming (`run_stream`/`transcribe_stream_shared` in `engine.rs`), preserve: (a) the `att_context_right` retry off the GGUF menu with the model's default (`Error::InvalidArgument` → retry with `None`), (b) language-hint degradation, and (c) the Stop-log session telemetry (`rtf`, partial count, mean cadence, `att_context_right`) — the only way to measure the WER-vs-fluency trade-off on a real device via logcat. Published trade-off reference: chunks {1120, 560, 320, 160, 80} ms with FLEURS WER at 1.12 s of en 7.91 / es 4.11 / fr 9.03 / it 4.25 / pt 5.48 / de 8.31; the card claims "competitive" accuracy even at 80 ms.
+- ✅ Do not add unnecessary `unsafe` Rust outside the JNI entry points (`#[no_mangle] pub unsafe extern "system" fn Java_…`).
 
-### 5.3 Plantilla para tests / nuevos componentes (resumen rápido)
+### 5.3 Template for tests / new components (quick reference)
 
-Crear un nuevo módulo Rust con JNI → requiere:
+Creating a new Rust module with JNI → requires:
 
 1. **Rust** (`src/<mod>.rs`):
    ```rust
@@ -489,7 +493,7 @@ Crear un nuevo módulo Rust con JNI → requiere:
    use once_cell::sync::Lazy;
    use std::sync::Mutex;
 
-   pub struct FooState { /* JVM + GlobalRef al target */ }
+   pub struct FooState { /* JVM + GlobalRef to the target */ }
 
    static STATE: Lazy<Mutex<Option<FooState>>> = Lazy::new(|| Mutex::new(None));
 
@@ -498,131 +502,129 @@ Crear un nuevo módulo Rust con JNI → requiere:
        env: JNIEnv, _class: JClass, target: JObject,
    ) { /* new_global_ref, attach thread, etc. */ }
    ```
-2. **Java** (paralelo):
+2. **Java** (parallel):
    ```java
    public class FooService extends Service {
        static {
            try { System.loadLibrary("c++_shared"); } catch (UnsatisfiedLinkError e) { }
            System.loadLibrary("android_transcribe_app");
        }
-       public void onStatusUpdate(String s) { /* runOnUiThread o mainHandler */ }
+       public void onStatusUpdate(String s) { /* runOnUiThread or mainHandler */ }
        private native void initNative(FooService self);
        private native void cleanupNative();
    }
    ```
-3. **Manifest**: añadir `<service android:name=".FooService" .../>`. **No** añadas `android:process` — la app es de un solo proceso a propósito (§1). Si el servicio captura audio, declara `android:foregroundServiceType="microphone"` **y** pide `RECORD_AUDIO` antes de llamar a `startForeground`.
+3. **Manifest**: add `<service android:name=".FooService" .../>`. Do **not** add `android:process` — the app is single-process on purpose (§1). If the service captures audio, declare `android:foregroundServiceType="microphone"` **and** request `RECORD_AUDIO` before calling `startForeground`.
 4. **lib.rs**: `pub mod foo;`.
 
-Crear un nuevo ajuste toggle en UI → marker file en `filesDir()` con un nombre `snake_case`; bindearlo con `bindMarkerSwitch(...)` en `MainActivity` (patrón ya existente). Propagar cadena a los 7 locales.
+Creating a new UI toggle setting → marker file in `filesDir()` with a `snake_case` name; bind it with `bindMarkerSwitch(...)` in `MainActivity` (existing pattern). Propagate the string to all 7 locales.
 
-### 5.4 Known limitations (leer antes de "arreglar" o "documentar" estas cosas)
+### 5.4 Known limitations (read before "fixing" or "documenting" any of this)
 
-Estado real y verificado, con la evidencia que lo respalda. **No** describas
-ninguno de estos puntos como si funcionara, y no los "arregles" a medias.
+Real, verified state, with the supporting evidence. Do **not** describe
+any of these as working, and do not "fix" them halfway.
 
-1. **El post-procesado on-device (S1-mini) NO está implementado y, además, no
-   es alcanzable desde la UI.** Doble barrera, ambas verificadas:
-   - **No hay motor de inferencia.** El único backend del árbol es
-     `transcribe-cpp 0.1.3`, cuya API pública es *speech recognition*
+1. **On-device post-processing (S1-mini) is NOT implemented and, on top of that,
+   not reachable from the UI.** Double barrier, both verified:
+   - **No inference engine.** The only backend in the tree is
+     `transcribe-cpp 0.1.3`, whose public API is *speech recognition*
      (`Model::load` / `Session::run(pcm: &[f32], RunOptions{ task: Transcribe |
-     Translate, … })`): no existe ningún entry point de generación de texto (ni
-     decode con prompt, ni sampler, ni encoder de tokenizer). S1-mini es un LM
-     causal tipo Qwen y necesitaría llama.cpp (o equivalente) + tokenizer BPE +
-     KV cache, nada de lo cual envía el proyecto. Por eso
-     `src/post_processor.rs::normalize_text_on_device` es un **placeholder**:
-     valida que el GGUF exista, construye el prompt real con
-     `aura_core::normalizer::build_s1_prompt` y lo **descarta**.
-   - **La UI ya no lo ofrece como si funcionara.**
-     `SettingsManager.LOCAL_S1_INFERENCE_AVAILABLE = false` hace que
-     `isProviderAvailable("local_s1")` sea `false`: el provider se muestra como
-     *«unavailable in this build»*, el switch no se puede activar, el botón de
-     descarga se oculta y un marker obsoleto se responde con
-     `PostProcessor.LOCAL_S1_UNAVAILABLE_ERROR` en vez de devolver el texto
-     simulado. `pack_ultralight_desc` se reescribió en los 7 locales para dejar
-     de prometer el refinado con S1-mini.
-   Si algún día se implementa la inferencia, hay que voltear **juntos**
-   `LOCAL_S1_INFERENCE_AVAILABLE`, el doc-comment de `normalize_text_on_device`
-   y este punto. `is_loaded` significa "se vio una ruta válida", no "los pesos
-   están en RAM".
-2. **Con la puerta cerrada (`LOCAL_S1_INFERENCE_AVAILABLE = false`), R8 elimina
-   del release TODA la superficie JNI del provider on-device:**
-   `nativeNormalizeOnDevice`, `nativeSetS1ModelPath`, `nativeUnloadS1` y
-   `nativeIsS1Loaded`. Verificado leyendo la tabla de strings de
-   `app/build/outputs/mapping/release/mapping.txt` y del `classes.dex` del APK
-   de release (2026-10): la constante `static final false` pliega la rama, y R8
-   borra también sus call sites (`processOnDeviceInternal`), así que no queda
-   ninguna llamada viva que pueda lanzar `UnsatisfiedLinkError` — ese
-   emparejamiento (caller y callee fuera a la vez) es la garantía real, no la
-   presencia del símbolo. `nativeTrimMemory` **sí** sobrevive, porque
-   `App.onTrimMemory` lo llama de verdad. Las cuatro funciones Rust siguen
-   existiendo en el cdylib y las declaraciones Java siguen en el código: son la
-   API del ciclo de vida para cuando exista motor de inferencia (punto 1). No las
-   borres por estar "sin usar" en el DEX de release.
-3. **Instrumentación, Macrobenchmark y Baseline Profile NO se han ejecutado**
-   nunca: no hay dispositivo/emulador arm64. El módulo `:benchmark` **compila**
-   (`:benchmark:assembleBenchmark`) pero sus tests son de dispositivo y están
-   fuera de CI a propósito. No presentes una Baseline Profile como generada.
-4. **`assembleRelease` y `bundleRelease` ya no se pueden pedir juntos** (antes
-   producían en silencio un APK de 32 MB sin modelo; ver §3 "Entrega del modelo
-   bundled"): la invocación combinada falla al configurar, y los gates
-   `verifyReleaseApkModel`/`verifyReleaseBundleModel` abren el artefacto real y
-   se niegan (verificado 2026-10 en las cuatro combinaciones: solo APK, solo AAB,
-   combinada y modelo ausente). No lo "arregles" volviendo a un único source set
-   para ambos: entregaría el modelo dos veces en el AAB.
-5. **Los tests Rust `#[cfg(test)]` de `audio`/`corrector` corren sólo en el crate
-   espejo**; el cdylib completo sigue bloqueado por `transcribe-cpp-sys v0.1.3`.
-6. **Resuelto (2026-10): las dos lecturas de disco del arranque de
-   `MainActivity` ya NO están en el hilo principal.** Antes
-   `maybeDownloadDebugModel()` (invocado desde `onCreate`/`onResume`) llamaba a
-   `hasImportedModel()` (marker `active_model`) y a
-   `hasBundledModel()` (`getAssets().list("builtin-model")`) de forma síncrona, y
-   StrictMode en debug lo reportaba. Ahora los dos sondeos viven en
-   `ModelAvailability` (sin `Context`, sin vistas) y corren en un hilo
-   `"model-probe"`; el resultado vuelve por `runOnUiThread` con
-   comprobación de `isFinishing()/isDestroyed()` y de una **generación**
-   (`modelProbeGeneration`), de modo que un resultado obsoleto no puede
-   sobrescribir el estado nuevo, y un flag `modelProbeInFlight` evita repetir el
-   sondeo en el par `onCreate`+`onResume` del arranque en frío. Mientras corre,
-   el `TextView` de estado muestra `status_checking` ("Checking assets…", que ya
-   era su valor por defecto en el layout) y el motor lo sobrescribe con "Ready"
-   al terminar `initNative`. Cobertura: `ModelAvailabilityTest` (10 tests JVM,
-   incluidos marker vacío, nombre apuntando a un fichero inexistente y nombre en
-   el directorio equivocado). El comportamiento de detección es el mismo que
-   antes (`exists()`, no `isFile()`); lo único que cambió es el hilo desde el que
-   se ejecuta. **No** volver a llamar a los sondeos directamente desde el hilo
-   principal.
-7. **Orden obligatorio del FGS `mediaProjection`** (Android 14+): el Activity
-   llama a `createScreenCaptureIntent()` y el usuario concede → el servicio llama
-   a `startForeground(..., FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)` → **sólo
-   después** `MediaProjectionManager.getMediaProjection()`. Al revés lanza
+     Translate, … })`): there is no text-generation entry point (no prompt
+     decode, no sampler, no tokenizer-encode path for a Qwen-family model (its
+     `Feature::InitialPrompt` is a Whisper decode hint, not generation).
+     SuperWhisper S1-mini is a Qwen-based causal LM, so running it requires a
+     text-generation engine (llama.cpp or equivalent) plus a BPE tokenizer, KV
+     cache, and sampler, none of which this project ships. That is why
+     `src/post_processor.rs::normalize_text_on_device` is a **placeholder**:
+     it verifies the GGUF exists, builds the real prompt with
+     `aura_core::normalizer::build_s1_prompt`, and **discards it**.
+   - **The UI no longer offers it as if it worked.**
+     `SettingsManager.LOCAL_S1_INFERENCE_AVAILABLE = false` makes
+     `isProviderAvailable("local_s1")` return `false`: the provider renders as
+     *"unavailable in this build"*, the switch cannot be enabled, the download
+     button is hidden, and an obsolete marker is answered with
+     `PostProcessor.LOCAL_S1_UNAVAILABLE_ERROR` instead of returning the
+     simulated text. `pack_ultralight_desc` was rewritten in all 7 locales to stop
+     promising S1-mini refinement.
+   If inference is ever implemented, `LOCAL_S1_INFERENCE_AVAILABLE`, the
+   `normalize_text_on_device` doc-comment, and this item must be flipped
+   **together** with a real implementation — never separately. `is_loaded` means
+   "a valid path was seen", not "weights are in RAM".
+2. **With the gate closed (`LOCAL_S1_INFERENCE_AVAILABLE = false`), R8 strips
+   from release the ENTIRE JNI surface of the on-device provider:**
+   `nativeNormalizeOnDevice`, `nativeSetS1ModelPath`, `nativeUnloadS1`, and
+   `nativeIsS1Loaded`. Verified by reading the string table of
+   `app/build/outputs/mapping/release/mapping.txt` and the release APK's
+   `classes.dex` (2026-10): the `static final false` constant folds the branch, and R8
+   also deletes its call sites (`processOnDeviceInternal`), so no live call remains
+   that could throw `UnsatisfiedLinkError` — that pairing (caller and callee out
+   together) is the real guarantee, not the symbol's presence. `nativeTrimMemory`
+   **does** survive, because `App.onTrimMemory` really calls it. The four Rust
+   functions still exist in the cdylib and the Java declarations stay in the code:
+   they are the lifecycle API for when an inference engine exists (item 1). Do not
+   delete them for looking "unused" in the release DEX.
+3. **Instrumentation, Macrobenchmark, and Baseline Profile have NEVER been run**:
+   there is no arm64 device/emulator. The `:benchmark` module **compiles**
+   (`:benchmark:assembleBenchmark`) but its tests are on-device and out of CI on
+   purpose. Do not present a Baseline Profile as generated.
+4. **`assembleRelease` and `bundleRelease` can no longer be requested together**
+   (they used to silently produce a 32 MB model-less APK; see §3 "Bundled model
+   delivery"): the combined invocation fails at configuration, and the
+   `verifyReleaseApkModel`/`verifyReleaseBundleModel` gates open the real artifact and
+   refuse (verified 2026-10 in all four combinations: APK only, AAB only,
+   combined, and missing model). Do not "fix" this by returning to a single source set
+   for both: it would deliver the model twice in the AAB.
+5. **The `audio`/`corrector` Rust `#[cfg(test)]` tests only run in the mirror
+   crate**; the full cdylib crate is still blocked by `transcribe-cpp-sys v0.1.3`.
+6. **Resolved (2026-10): the two `MainActivity` startup disk reads are NO longer
+   on the main thread.** `maybeDownloadDebugModel()` (invoked from
+   `onCreate`/`onResume`) used to call `hasImportedModel()` (`active_model` marker)
+   and `hasBundledModel()` (`getAssets().list("builtin-model")`) synchronously, which
+   StrictMode flagged in debug. Both probes now live in `ModelAvailability` (no
+   `Context`, no views) and run on a `"model-probe"` thread; the result returns via
+   `runOnUiThread` guarded by `isFinishing()/isDestroyed()` and a **generation**
+   (`modelProbeGeneration`), so a stale result cannot overwrite fresh state, and a
+   `modelProbeInFlight` flag avoids repeating the probe in the cold-start
+   `onCreate`+`onResume` pair. While it runs, the status `TextView` shows
+   `status_checking` ("Checking assets…", already its default value in the layout)
+   and the engine overwrites it with "Ready" when `initNative` finishes. Coverage:
+   `ModelAvailabilityTest` (10 JVM tests, including empty marker, name pointing at a
+   nonexistent file, and name in the wrong directory). Detection behavior is unchanged
+   (`exists()`, not `isFile()`); only the thread it runs on changed. Do **not**
+   call the probes directly from the main thread again.
+7. **Mandatory `mediaProjection` FGS ordering** (Android 14+): the Activity calls
+   `createScreenCaptureIntent()` and the user grants → the service calls
+   `startForeground(..., FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)` → **only
+   then** `MediaProjectionManager.getMediaProjection()`. Reversed, it throws
    `SecurityException` ("Media projections require a foreground service of type
-   …") y `LiveSubtitleService` lo convertía en un `stopSelf()` silencioso.
-   Documentado en `developer.android.com/about/versions/14/changes/fgs-types-required`.
+   …") and `LiveSubtitleService` used to turn it into a silent `stopSelf()`.
+   Documented at `developer.android.com/about/versions/14/changes/fgs-types-required`.
 
 ---
 
-## 6. Convenciones de commits
+## 6. Commit conventions
 
-- Estilo observado en `git log`:
-  - `feat: <qué>`, `fix: <qué>`, `chore: <qué>`, `ci: <qué>`, `docs: <qué>`, `refactor: <qué>`, `build: <qué>`.
-  - Lenguaje de los mensajes: inglés, frases imperativas concisas, sin punto final.
-- Para cambios visibles al usuario que merezcan release, **primero redactar el bloque en `RELEASE_NOTES.md` respetando estrictamente el límite de 125–250 palabras**, luego el commit, luego el tag `vX.Y.Z` (el CI dispara el build firmado y crea el GitHub Release con las notas).
+- Style observed in `git log`:
+  - `feat: <what>`, `fix: <what>`, `chore: <what>`, `ci: <what>`, `docs: <what>`, `refactor: <what>`, `build: <what>`.
+  - Message language: English, concise imperative phrases, no trailing period.
+- For user-visible changes deserving a release, **first draft the block in `RELEASE_NOTES.md` strictly within the 125–250 word limit**, then commit, then tag `vX.Y.Z` (CI fires the signed build and creates the GitHub Release with the notes).
 
 ---
 
-## 7. TL;DR para una IA nueva
+## 7. TL;DR for a new AI
 
-- Lee `src/engine.rs` y `Cargo.toml` primero.
-- Respeta nombres JNI (`Java_dev_notune_transcribe_<Class>_<method>`) y firmas de call-backs en §4.4.
-- Ajustes = marker files en `filesDir`. La clave API NO va en claro: se guarda cifrada (`pp_api_key_enc`, AES-256-GCM + AndroidKeyStore); el marker `pp_api_key` en Base64 es solo el formato legado que la migración reemplaza (verify-before-delete, sin fallback a texto plano).
-- **La credencial se lee de forma asíncrona en la lane `credential-ops`** (`SettingsManager.readApiKey` / `readPostProcessEnabled`): ningún componente hace I/O de credencial ni descifrado en el hilo principal, y «aún no leída» (importación legada pendiente) **nunca** significa «no configurado». Al decidir si post-procesar usa `isPostProcessSwitchedOn()` (barato) y deja el veredicto de la credencial a `PostProcessor`, que lee ordenado antes de la petición.
-- Post-procesado: opcional, *safe-fallback* obligatorio al texto crudo.
-- Idioma se re-lee en cada `Engine::run` (no cachear en memoria dentro del engine).
-- Subtítulos usan un modelo de partial/final con lag-policies calibradas; subir esos números rompe el contrato.
-- Bug histórico a evitar: v0.1.20 → v0.1.21 (idioma cacheado en el engine). La regla "re-read on every run" está escrita en muchos comentarios a propósito.
-- **La app es de UN SOLO PROCESO.** No hay `android:process` y no debe haberlo (§1): el IME y el popup comparten un mismo `cpal::Stream` y el engine global.
-- **Android 17 es API 37** (Android 15 es API 35). `compileSdk`/`targetSdk` = 37, AGP 9.4.1, Gradle 9.8.0, NDK 28.2.13676358. No describas API 35 como "Android 17".
-- Release con R8 + resource shrinking activos; si tocas reflexión, JNI o nombres invocados por cadena, actualiza `app/proguard-rules.pro`.
-- Targets táctiles ≥ 48dp y colores siempre vía `?attr/color*` (sin literales hex en layouts/drawables).
-- Antes de PR: `./gradlew :app:testDebugUnitTest`, `python3 scripts/check_translations.py` y `./gradlew :app:assembleDebug` deben pasar limpios, y las cadenas nuevas deben estar en los 7 locales.
-- **Validar builds por entorno (2026-08-06, actualizado 2026-10):** en un host tipo dispositivo móvil/embebido NUNCA compiles localmente — `git push` a `main` y lee el workflow debug de GitHub Actions con `gh run list`/`gh run view`. En un equipo físico real (portátil/escritorio con SDK, NDK, Rust y red) **sí debes compilar en local**; es la vía de validación preferida.
+- Read `src/engine.rs` and `Cargo.toml` first.
+- Respect JNI names (`Java_dev_notune_transcribe_<Class>_<method>`) and callback signatures in §4.4.
+- Settings = marker files in `filesDir`. The API key NEVER goes in plaintext: it is stored encrypted (`pp_api_key_enc`, AES-256-GCM + AndroidKeyStore); the Base64 `pp_api_key` marker is only the legacy format the migration replaces (verify-before-delete, no plaintext fallback).
+- **Credentials are read asynchronously on the `credential-ops` lane** (`SettingsManager.readApiKey` / `readPostProcessEnabled`): no component does credential I/O or decryption on the main thread, and "not yet read" (pending legacy import) **never** means "not configured". When deciding whether to post-process, use the cheap `isPostProcessSwitchedOn()` and leave the credential verdict to `PostProcessor`, which reads in order before the request.
+- Post-processing: optional, mandatory *safe-fallback* to the raw text.
+- Language is re-read on every `Engine::run` (do not cache it in memory inside the engine).
+- Subtitles use a partial/final model with calibrated lag policies; raising those numbers breaks the contract.
+- Historical bug to avoid: v0.1.20 → v0.1.21 (language cached in the engine). The "re-read on every run" rule is written in many comments on purpose.
+- **The app is SINGLE-PROCESS.** There is no `android:process` and there must not be one (§1): the IME and the popup share one `cpal::Stream` and the global engine.
+- **Android 17 is API 37** (Android 15 is API 35). `compileSdk`/`targetSdk` = 37, AGP 9.4.1, Gradle 9.8.0, NDK 28.2.13676358. Never describe API 35 as "Android 17".
+- Release with active R8 + resource shrinking; if you touch reflection, JNI, or string-invoked names, update `app/proguard-rules.pro`.
+- Touch targets ≥ 48dp and colors always via `?attr/color*` (no hex literals in layouts/drawables).
+- Before a PR: `./gradlew :app:testDebugUnitTest`, `python3 scripts/check_translations.py` and `./gradlew :app:assembleDebug` must pass clean, and new strings must be in all 7 locales.
+- Spanish (`es-ES`) is a first-class locale, not an afterthought: the ES+EN phonetic encoder (seseo/yeísmo, `ñ`→`ny`), the BCP-47 locale list, and the per-language WER reference in §5.2 exist so non-English transcription never silently regresses. Never "normalize" non-English fixtures or phonetic rules away.
+- **Validate builds per environment (2026-08-06, updated 2026-10):** on a mobile/embedded-type host NEVER compile locally — `git push` to `main` and read the GitHub Actions debug workflow with `gh run list`/`gh run view`. On a real physical machine (laptop/desktop with SDK, NDK, Rust, and network) **do compile locally**; it is the preferred validation path.

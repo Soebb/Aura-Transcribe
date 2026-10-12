@@ -800,7 +800,7 @@ public class LiveSubtitleService extends Service {
         return null;
     }
 
-    // Native methods
+    // Native methods: JNI bridge into the Rust subtitle pipeline (see AGENTS.md S4.3)
     private native void initNative(LiveSubtitleService service);
     private native void cleanupNative();
     private native void pushAudio(float[] data, int length);
