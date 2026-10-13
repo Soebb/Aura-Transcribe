@@ -192,10 +192,13 @@ android {
         }
     }
 
-    // Per-app language picker (Android 13+): AGP derives the locale list from the
-    // values-*/ folders and writes android:localeConfig for us.
+    // Per-app language picker (Android 13+): the curated list in
+    // res/xml/locales_config.xml (wired via android:localeConfig in the
+    // manifest and kept in sync with LocalePrefs.SUPPORTED) wins over the
+    // AGP-derived list, so auto-generation stays off — enabling both fails
+    // the manifest merge (locale config requested twice).
     androidResources {
-        generateLocaleConfig = true
+        generateLocaleConfig = false
     }
 
     // Play Asset Delivery: large model files go into a separate asset pack
