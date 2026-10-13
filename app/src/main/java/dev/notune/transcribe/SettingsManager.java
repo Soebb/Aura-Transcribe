@@ -262,6 +262,27 @@ public class SettingsManager implements PostProcessor.PostProcessorSettings {
     }
 
     /**
+     * Whether post-processing is configured <em>and usable</em> for {@code providerId},
+     * regardless of whether the master switch is currently on. Pure, so the rule is
+     * testable without a {@code Context} and shared by {@link #readPostProcessConfigured}
+     * and UI toggle guards.
+     */
+    public static boolean resolvePostProcessConfigured(String providerId,
+                                                      ApiKeyRead credential,
+                                                      boolean localModelInstalled) {
+        if (!isProviderAvailable(providerId)) {
+            return false;
+        }
+        if (PROVIDER_LOCAL_S1.equals(providerId)) {
+            // The model being on disk is not enough: without an inference engine
+            // the provider produces no refinement at all, so treating it as
+            // "configured" is what let the nonfunctional path be enabled.
+            return LOCAL_S1_INFERENCE_AVAILABLE && localModelInstalled;
+        }
+        return credential != null && credential.hasCredential();
+    }
+
+    /**
      * Whether post-processing is enabled <em>and usable</em>, from the switch state
      * and a credential outcome. Pure, so the rule is testable without a
      * {@code Context} and shared by {@link #readPostProcessEnabled} and the
@@ -270,14 +291,7 @@ public class SettingsManager implements PostProcessor.PostProcessorSettings {
     public static boolean resolvePostProcessEnabled(boolean switchedOn, String providerId,
                                                    ApiKeyRead credential,
                                                    boolean localModelInstalled) {
-        if (!switchedOn) return false;
-        if (PROVIDER_LOCAL_S1.equals(providerId)) {
-            // The model being on disk is not enough: without an inference engine
-            // the provider produces no refinement at all, so treating it as
-            // "configured" is what let the nonfunctional path be enabled.
-            return LOCAL_S1_INFERENCE_AVAILABLE && localModelInstalled;
-        }
-        return credential != null && credential.hasCredential();
+        return switchedOn && resolvePostProcessConfigured(providerId, credential, localModelInstalled);
     }
 
     /**
@@ -330,6 +344,20 @@ public class SettingsManager implements PostProcessor.PostProcessorSettings {
                         readApiKeyOnLane(), isLocalS1ModelInstalled()),
                 callbackExecutor,
                 enabled -> callback.accept(Boolean.TRUE.equals(enabled)));
+    }
+
+    /**
+     * Ordered, off-main "is AI fix configured and ready to use?" check: the credential
+     * or local model state queued behind every pending mutation, ignoring whether
+     * the switch is currently on. Used when toggling AI fix from the keyboard or overlay.
+     */
+    public void readPostProcessConfigured(Executor callbackExecutor, Consumer<Boolean> callback) {
+        if (callback == null) return;
+        CREDENTIAL_OPS.submitValue(
+                () -> resolvePostProcessConfigured(getProviderId(),
+                        readApiKeyOnLane(), isLocalS1ModelInstalled()),
+                callbackExecutor,
+                configured -> callback.accept(Boolean.TRUE.equals(configured)));
     }
 
     /**

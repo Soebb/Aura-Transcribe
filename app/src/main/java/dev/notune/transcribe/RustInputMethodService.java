@@ -260,8 +260,9 @@ public class RustInputMethodService extends InputMethodService {
                     // Turning it on needs a usable credential. Ask the lane and
                     // only then persist, so the switch never shows ON for a state
                     // the credential store cannot back.
-                    settingsManager.readPostProcessEnabled(mainHandler::post, usable -> {
+                    settingsManager.readPostProcessConfigured(mainHandler::post, usable -> {
                         if (isDestroyed) return;
+                        if (!buttonView.isChecked()) return;
                         if (!usable) {
                             suppressPpToggle = true;
                             try {

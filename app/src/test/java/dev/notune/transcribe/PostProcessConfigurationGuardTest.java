@@ -278,6 +278,40 @@ public class PostProcessConfigurationGuardTest {
     }
 
     @Test
+    public void testResolvePostProcessConfiguredIndependentOfSwitchState() {
+        assertTrue("A valid credential means the provider is configured to be toggled on",
+                SettingsManager.resolvePostProcessConfigured(
+                        "openai", ApiKeyRead.loaded("sk-valid-key"), false));
+        assertFalse("An empty credential means the provider is not configured",
+                SettingsManager.resolvePostProcessConfigured(
+                        "openai", ApiKeyRead.loaded(""), false));
+        assertFalse("An absent credential means the provider is not configured",
+                SettingsManager.resolvePostProcessConfigured(
+                        "openai", ApiKeyRead.absent(), false));
+        assertFalse("An unreadable credential means the provider is not configured",
+                SettingsManager.resolvePostProcessConfigured(
+                        "openai", ApiKeyRead.unreadable(), false));
+        assertFalse("An unavailable provider cannot be configured",
+                SettingsManager.resolvePostProcessConfigured(
+                        SettingsManager.PROVIDER_LOCAL_S1, ApiKeyRead.absent(), false));
+    }
+
+    @Test
+    public void testResolvePostProcessEnabledAgreesWithConfiguredAndSwitch() {
+        ApiKeyRead validKey = ApiKeyRead.loaded("sk-valid-key");
+        assertTrue("Switch ON + configured -> enabled",
+                SettingsManager.resolvePostProcessEnabled(true, "openai", validKey, false));
+        assertFalse("Switch OFF + configured -> disabled",
+                SettingsManager.resolvePostProcessEnabled(false, "openai", validKey, false));
+
+        ApiKeyRead emptyKey = ApiKeyRead.loaded("");
+        assertFalse("Switch ON + unconfigured -> disabled",
+                SettingsManager.resolvePostProcessEnabled(true, "openai", emptyKey, false));
+        assertFalse("Switch OFF + unconfigured -> disabled",
+                SettingsManager.resolvePostProcessEnabled(false, "openai", emptyKey, false));
+    }
+
+    @Test
     public void testPostProcessorBypassesWhenNotConfigured() {
         TestSettings settings = new TestSettings();
         settings.enabled = true;

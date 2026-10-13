@@ -538,8 +538,9 @@ public class FloatingOverlayService extends Service {
                 }
                 // Turning it on needs a usable credential: ask the lane, then
                 // persist only if the answer is yes.
-                sm.readPostProcessEnabled(mMainHandler::post, usable -> {
+                sm.readPostProcessConfigured(mMainHandler::post, usable -> {
                     if (mIsDestroyed) return;
+                    if (!buttonView.isChecked()) return;
                     if (!usable) {
                         mSuppressPpToggle = true;
                         try {
