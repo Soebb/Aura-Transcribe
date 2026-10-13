@@ -289,4 +289,8 @@
     <string name="mic_test_btn_stop">Arrêter le test audio</string>
     <string name="mic_test_active_device">Périphérique actif : %1$s</string>
     <string name="mic_active_builtin">Microphone interne</string>
+
+    <!-- App UI language (auto = follow system) -->
+    <string name="setting_language">Langue de l\'app</string>
+    <string name="language_auto">Automatique (système)</string>
 </resources>

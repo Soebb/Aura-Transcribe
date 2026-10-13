@@ -4,15 +4,23 @@
 [![Architecture](https://img.shields.io/badge/ABI-arm64--v8a-orange.svg)](#requirements--compatibility)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
+English · [Español](README_es.md) · [Deutsch](README_de.md) · [Français](README_fr.md) · [Italiano](README_it.md) · [中文](README_zh.md)
+
 Aura Transcribe is an on-device speech-to-text application and voice input service for Android. Powered by Rust, ARM NEON SIMD optimizations, and GGML inference kernels, it performs speech recognition locally on the device CPU without requiring an active network connection.
 
 The application functions across multiple Android integration points, providing standard keyboard voice typing, a standalone input method editor (IME), a floating dictation overlay, live captions for system audio, and offline audio file transcription.
+
+## Screenshots
+
+| Home | Recording | Live subtitles |
+| --- | --- | --- |
+| ![Home screen](.screenshots/screenshot_home.png) | ![Recording screen](.screenshots/screenshot_recording.png) | ![Live subtitles](.screenshots/screenshot_subtitles.png) |
 
 ---
 
 ## Key Features
 
-- **On-Device Speech Recognition:** Transcription runs 100% locally using a quantized [Nemotron 3.5 ASR Streaming 0.6B](https://huggingface.co/nvidia/nemotron-3.5-asr-streaming-0.6b) model (Q5_K_M GGUF, licensed under OpenMDW-1.1). Audio recordings never leave your device.
+- **On-Device Speech Recognition:** Transcription runs 100% locally using a quantized [Nemotron 3.5 ASR Streaming 0.6B](https://huggingface.co/nvidia/nemotron-3.5-asr-streaming-0.6b) model (Q8_0 GGUF). Audio recordings never leave your device.
 - **System-Wide Voice Typing:** Responds to Android's `RecognizerIntent.ACTION_RECOGNIZE_SPEECH` to supply a bottom-sheet dictation panel in compatible keyboards (such as Microsoft SwiftKey) and browser voice fields.
 - **Dedicated Input Method Editor (IME):** Includes a standalone voice keyboard for one-tap dictation across apps using standard input method switching.
 - **Voice Recognition Service:** Implements the system `SpeechRecognizer` service API for third-party keyboard and app integrations.
@@ -22,7 +30,7 @@ The application functions across multiple Android integration points, providing 
 - **Multi-Device Audio Routing:** Dynamically detects and routes audio from internal microphones, USB audio interfaces, and Bluetooth headsets (SCO and BLE Audio) with automatic switching and manual overrides.
 - **Language Coverage:**
   - **User Interface:** Available in 7 languages (English base, German, Spanish, French, Italian, Portuguese, and Russian).
-  - **Speech Recognition:** The built-in Nemotron model supports multilingual speech recognition natively with streaming auto-detection (trained across 35 languages, benchmarked across 28 FLEURS languages and 32 regional locales); 33 regional locales are directly selectable from the language picker. Additional user-imported GGUF models (e.g., Whisper) can support up to 99 languages.
+  - **Speech Recognition:** The built-in Nemotron model supports 40 language-locales natively with streaming auto-detection; 33 regional locales are directly selectable from the language picker. Additional user-imported GGUF models (e.g., Whisper) can support up to 99 languages.
 - **Optional Text Post-Processing:** Configurable formatting and cleanup using external OpenAI-compatible API providers (OpenAI, Groq, Cerebras, OpenRouter, Mistral, Together, Ollama) or an untouched *Verbatim* preset.
 
 ---
@@ -95,8 +103,8 @@ Cross-compilation is supported on `linux-x86_64`, `linux-aarch64`, `darwin-x86_6
 
 ### 1. Clone the Repository
 ```bash
-git clone https://github.com/marodriguezd/Aura-Transcribe.git
-cd Aura-Transcribe
+git clone https://github.com/marodriguezd/android_transcribe_app.git
+cd android_transcribe_app
 ```
 
 ### 2. Download and Verify Built-in Models
@@ -111,7 +119,7 @@ Compile the native `cdylib` and JNI bindings for `arm64-v8a`:
 ```bash
 cargo ndk -t arm64-v8a -o app/src/main/jniLibs build --release
 ```
-*(Note: Gradle invokes cargo-ndk automatically during build/assembly when native sources or inputs change, and tracks incremental outputs.)*
+*(Note: `./gradlew assembleDebug` will invoke this automatically if the `.so` library is missing.)*
 
 ### 4. Assemble Debug APK
 ```bash
@@ -152,12 +160,13 @@ Build release artifacts in **separate invocations** to ensure proper asset packa
 ./gradlew bundleRelease
 ```
 
-Without an authorized `release.keystore` (plus `STORE_PASS`, `KEY_ALIAS`,
-`KEY_PASS`) `assembleRelease` succeeds but produces an **unsigned**
-`app-release-unsigned.apk`. That is a source build, not a distributable release:
-F-Droid-style buildservers compile from source and sign with their own key. If a
-keystore is present but any of the three credentials is missing, the build fails
-immediately rather than falling back to a debug or default key.
+> [!WARNING]
+> Without an authorized `release.keystore` (plus `STORE_PASS`, `KEY_ALIAS`,
+> `KEY_PASS`) `assembleRelease` succeeds but produces an **unsigned**
+> `app-release-unsigned.apk`. That is a source build, not a distributable release:
+> F-Droid-style buildservers compile from source and sign with their own key. If a
+> keystore is present but any of the three credentials is missing, the build fails
+> immediately rather than falling back to a debug or default key.
 
 ---
 
@@ -237,10 +246,11 @@ asset pack counts as a duplicate. `scripts/verify_release_artifact.py` performs
 the same check independently on an already-built artifact, comparing content
 hashes against the source asset.
 
-The only way to produce a release APK without the model is to pass
-`-Pauratranscribe.allowModelLessReleaseApk=true`, which prints that the result is
-not distributable. It exists for local experiments; the release workflow greps
-for it and refuses to build. An AAB has no such opt-out.
+> [!CAUTION]
+> The only way to produce a release APK without the model is to pass
+> `-Pauratranscribe.allowModelLessReleaseApk=true`, which prints that the result is
+> not distributable. It exists for local experiments; the release workflow greps
+> for it and refuses to build. An AAB has no such opt-out.
 
 ---
 
@@ -249,19 +259,10 @@ for it and refuses to build. An AAB has no such opt-out.
 - **On-Device S1-mini Post-Processing is Unavailable:** While configuration options, model download paths, and prompt templates exist in the codebase for S1-mini, on-device text generation is not implemented in this build. The current inference backend (`transcribe-cpp`) is specialized for speech recognition and does not support causal language model generation. The local S1-mini provider is disabled in the settings UI.
 - **Hardware Architecture Restriction:** The application only runs on 64-bit ARM hardware (`arm64-v8a`) with ARMv8.2 dotprod/fp16 support. It does not run on x86 or x86_64 emulators or devices.
 - **Accessibility Insertion Support:** Direct text insertion via the floating overlay relies on Android's Accessibility framework. Non-standard or web-based text fields that do not expose editable accessibility nodes may require manually pasting from the clipboard.
-- **Model Import Constraints:** User-imported GGUF models are subject to a safety ceiling of 4 GiB, sanitized filename checks, and pre-allocation checks against available storage. Incomplete, empty, or oversized streams are rejected before replacing existing models.
 
 ---
 
-## Attribution and License
-
-Aura Transcribe application code is open-source software licensed under the [MIT License](LICENSE).
-
-```text
-MIT License
-
-Copyright (c) 2025 Noah Mühl
-```
+## Attribution
 
 ### Upstream Project
 
@@ -269,8 +270,8 @@ This repository is an independent fork of [Offline Voice Input](https://github.c
 
 Subsequent additions and architectural changes in this fork—including multi-device audio routing, floating dictation overlays, optional remote text post-processing, and multi-surface integrations—were developed independently and are not associated with the original upstream author.
 
-### Third-Party Credits & Component Licenses
+### Third-Party Credits
 
-- **Speech Model Weights & Architecture:** [Nemotron 3.5 ASR Streaming 0.6B](https://huggingface.co/nvidia/nemotron-3.5-asr-streaming-0.6b) by NVIDIA Corporation, quantized to GGUF (Q5_K_M) by [handy-computer](https://huggingface.co/handy-computer/nemotron-3.5-asr-streaming-0.6b-gguf). The model weights and architecture artifacts are licensed under the **OpenMDW License Agreement, version 1.1 (OpenMDW-1.1)**; see [MODEL_LICENSE.md](MODEL_LICENSE.md) for the full text, notices of origin, and redistribution conditions.
-- **Inference Kernels:** [transcribe.cpp](https://github.com/handy-computer/transcribe.cpp) and [ggml](https://github.com/ggerganov/ggml) by CJ Pais, Georgi Gerganov, and contributors (MIT / Apache-2.0 licenses).
-- **Audio Capture:** [cpal](https://github.com/RustAudio/cpal) (Cross-Platform Audio Library; Apache-2.0 license).
+- **Speech Model Architecture:** [Nemotron 3.5 ASR Streaming 0.6B](https://huggingface.co/nvidia/nemotron-3.5-asr-streaming-0.6b) by NVIDIA, quantized to GGUF (Q8_0) by [handy-computer](https://huggingface.co/handy-computer/nemotron-3.5-asr-streaming-0.6b-gguf) (licensed under CC-BY 4.0).
+- **Inference Kernels:** [transcribe.cpp](https://github.com/handy-computer/transcribe.cpp) and [ggml](https://github.com/ggerganov/ggml) by CJ Pais and Georgi Gerganov.
+- **Audio Capture:** [cpal](https://github.com/RustAudio/cpal) (Cross-Platform Audio Library).

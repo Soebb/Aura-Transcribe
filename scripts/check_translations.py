@@ -17,9 +17,14 @@ ROOT = Path(__file__).resolve().parent.parent
 RES = ROOT / "app" / "src" / "main" / "res"
 
 
-def trans_names(path):
+import re
+
+PLACEHOLDER_RE = re.compile(r"%(\d+\$)?[sdf]|\{[^}]+\}")
+
+
+def trans_values(path):
     root = ET.parse(path).getroot()
-    names = []
+    values = {}
     for s in root.findall("string"):
         name = s.get("name")
         if name is None:
@@ -27,13 +32,22 @@ def trans_names(path):
         trans = s.get("translatable", "true")
         if trans in ("false", "0"):
             continue
-        names.append(name)
-    return names
+        values[name] = "".join(s.itertext())
+    return values
+
+
+def trans_names(path):
+    return list(trans_values(path).keys())
+
+
+def placeholders_of(text):
+    return sorted(PLACEHOLDER_RE.findall(text or ""))
 
 
 def main():
     base = RES / "values" / "strings.xml"
-    base_names = sorted(set(trans_names(base)))
+    base_values = trans_values(base)
+    base_names = sorted(set(base_values.keys()))
     print(f"base translatable strings: {len(base_names)}")
 
     # Locale dirs look like values-de, values-es-rES. Configuration qualifiers
@@ -52,13 +66,24 @@ def main():
             print(f"FAIL {loc.name}: missing strings.xml")
             status = 1
             continue
-        names = sorted(set(trans_names(f)))
+        cur_values = trans_values(f)
+        names = sorted(set(cur_values.keys()))
         missing = sorted(set(base_names) - set(names))
         extra = sorted(set(names) - set(base_names))
-        if not missing and not extra:
+        blanks = sorted(n for n, v in cur_values.items() if not (v or "").strip())
+        echo_keys = sorted(
+            n for n in names
+            if n in base_values and (cur_values[n] or "").strip() == (base_values[n] or "").strip() and len((base_values[n] or "").strip()) > 1
+        )
+        ph_mismatch = sorted(
+            n for n in names
+            if n in base_values and placeholders_of(cur_values[n]) != placeholders_of(base_values[n])
+        )
+        hard_fail = bool(missing or extra or blanks or ph_mismatch)
+        if not hard_fail and not echo_keys:
             print(f"ok   {loc.name}: all {len(names)} translatable strings present")
         else:
-            print(f"FAIL {loc.name}:")
+            print(f"{'FAIL' if hard_fail else 'WARN'} {loc.name}:")
             if missing:
                 print("  missing:")
                 for m in missing:
@@ -67,7 +92,20 @@ def main():
                 print("  extra (not in base):")
                 for e in extra:
                     print(f"    - {e}")
-            status = 1
+            if blanks:
+                print("  blank values:")
+                for b in blanks[:10]:
+                    print(f"    - {b}")
+            if ph_mismatch:
+                print("  placeholder mismatch vs base:")
+                for p in ph_mismatch[:10]:
+                    print(f"    - {p}: base={placeholders_of(base_values[p])} cur={placeholders_of(cur_values[p])}")
+            if echo_keys:
+                print("  WARN untranslated copies of English (review, not fatal):")
+                for u in echo_keys[:10]:
+                    print(f"    - {u}")
+            if hard_fail:
+                status = 1
 
     print("-" * 60)
     if status:

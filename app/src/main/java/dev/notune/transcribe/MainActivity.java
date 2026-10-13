@@ -275,6 +275,57 @@ public class MainActivity extends AppCompatActivity {
             SubtitlePrefs.setMaxLines(this, lines);
         });
 
+        android.widget.Spinner languageSpinner = findViewById(R.id.spinner_language);
+        if (languageSpinner != null) {
+            java.util.List<String> languageTags = new java.util.ArrayList<>();
+            languageTags.add(LocalePrefs.AUTO);
+            languageTags.addAll(LocalePrefs.SUPPORTED);
+            java.util.List<String> languageLabels = new java.util.ArrayList<>();
+            for (String tag : languageTags) {
+                if (LocalePrefs.AUTO.equals(tag)) {
+                    languageLabels.add(getString(R.string.language_auto));
+                } else {
+                    languageLabels.add(LocalePrefs.nativeName(tag));
+                }
+            }
+            android.widget.ArrayAdapter<String> languageAdapter =
+                    new android.widget.ArrayAdapter<>(
+                            this,
+                            android.R.layout.simple_spinner_item,
+                            languageLabels);
+            languageAdapter.setDropDownViewResource(
+                    android.R.layout.simple_spinner_dropdown_item);
+            languageSpinner.setAdapter(languageAdapter);
+            String currentTag = LocalePrefs.getTag(this);
+            int selected = languageTags.indexOf(currentTag);
+            // setSelection(..., false) still fires onItemSelected on some
+            // devices, so guard the initial callback with a flag.
+            final boolean[] languageInit = {true};
+            languageSpinner.setSelection(Math.max(selected, 0), false);
+            languageSpinner.setOnItemSelectedListener(
+                    new android.widget.AdapterView.OnItemSelectedListener() {
+                        @Override
+                        public void onItemSelected(
+                                android.widget.AdapterView<?> parent,
+                                android.view.View view,
+                                int position,
+                                long id) {
+                            if (languageInit[0]) {
+                                languageInit[0] = false;
+                                return;
+                            }
+                            String tag = languageTags.get(position);
+                            if (!tag.equals(LocalePrefs.getTag(MainActivity.this))) {
+                                LocalePrefs.setTag(MainActivity.this, tag);
+                            }
+                        }
+
+                        @Override
+                        public void onNothingSelected(
+                                android.widget.AdapterView<?> parent) {}
+                    });
+        }
+
         RadioGroup themeGroup = findViewById(R.id.rg_theme);
         switch (ThemePrefs.getMode(this)) {
             case AppCompatDelegate.MODE_NIGHT_NO:

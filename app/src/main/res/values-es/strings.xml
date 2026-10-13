@@ -289,4 +289,8 @@
     <string name="mic_test_btn_stop">Detener prueba de sonido</string>
     <string name="mic_test_active_device">Dispositivo activo: %1$s</string>
     <string name="mic_active_builtin">Micrófono interno</string>
+
+    <!-- App UI language (auto = follow system) -->
+    <string name="setting_language">Idioma de la app</string>
+    <string name="language_auto">Automático (sistema)</string>
 </resources>

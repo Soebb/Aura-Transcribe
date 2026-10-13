@@ -42,6 +42,7 @@ public class App extends Application {
         super.onCreate();
         enableStrictModeInDebug();
         ThemePrefs.apply(this);
+        LocalePrefs.apply(this);
         DynamicColors.applyToActivitiesIfAvailable(this);
 
         // The one-time legacy→marker settings migration runs HERE on the main
