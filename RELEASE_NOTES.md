@@ -1,10 +1,9 @@
-# Aura Transcribe v0.3.2 — Optimized 5-bit Quantization (Nemotron 3.5 Q5_K_M)
+# Aura Transcribe v0.3.3 — AI Fix Keyboard & Overlay Toggle Reliability
 
-`versionCode 47` (`v0.3.2`) — Major model efficiency update upgrading the default bundled neural speech recognition model from 8-bit (`Q8_0`) to 5-bit medium k-quant (`Q5_K_M`). Delivers a 25.5% reduction in package and storage size, approximately 210 MB lower runtime memory consumption, and faster streaming inference with full transcription accuracy.
+`versionCode 48` (`v0.3.3`) — Maintenance and reliability release resolving a state-persistence issue in AI post-processing controls across the on-screen keyboard (`RustInputMethodService`) and floating overlay (`FloatingOverlayService`).
 
 ### Key Highlights
-- **25.5% Storage Reduction:** Download and disk footprint drops from 751 MB down to 560 MB.
-- **Lower Memory & Energy Consumption:** Peak RAM usage is reduced by approximately 210 MB, improving battery life during continuous streaming dictation and preventing memory pressure on mid-range devices.
-- **Full Multilingual Accuracy:** Benchmark evaluations across multilingual speech (English, Spanish, French, Portuguese) demonstrate near-identical Word Error Rate (WER) and Character Error Rate (CER) compared to the 8-bit baseline.
-- **Sub-200ms Responsiveness:** Preserves instantaneous live transcription with the native 80ms chunk cadence in both the voice keyboard and floating overlay.
-- **Reproducible Benchmark Suite:** Integrated evaluation tooling validating model accuracy and resource trade-offs on the FLEURS corpus.
+- **Persistent AI Fix Toggle State:** Fixed an issue where disabling the AI Fix switch from the keyboard or floating overlay removed the disk marker (`pp_enabled`) and subsequently blocked users from reactivating it without reopening the main settings activity.
+- **Decoupled Configuration & Enablement Checks:** Introduced `resolvePostProcessConfigured` and `readPostProcessConfigured` in `SettingsManager`. The toggle listener now asynchronously validates provider credential and local model readiness on the credential lane independently of whether the global switch is currently toggled on.
+- **Race Condition Prevention:** Added defensive checks ensuring late asynchronous credential callbacks never overwrite user intent if the toggle state was modified during an in-flight check.
+- **Unit Test Coverage:** Added automated test cases in `PostProcessConfigurationGuardTest` verifying that provider configuration evaluation functions consistently regardless of switch state.

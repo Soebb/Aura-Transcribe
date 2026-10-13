@@ -2,6 +2,13 @@
 
 Change log of **Aura Transcribe** (Next-Gen evolution of [notune/android_transcribe_app](https://github.com/notune/android_transcribe_app)).
 
+# v0.3.3 — AI Fix Keyboard & Overlay Toggle Reliability
+
+- **Persistent AI Fix Toggle State:** Fixed a bug where disabling the AI Fix toggle on the on-screen keyboard (`RustInputMethodService`) or floating overlay (`FloatingOverlayService`) removed the `pp_enabled` marker file and prevented re-enabling it directly from the UI without navigating back to the settings screen.
+- **Independent Configuration Validation:** Introduced `resolvePostProcessConfigured` and `readPostProcessConfigured` in `SettingsManager` to query provider credential/model validity on the credential lane independently of the switch's current state.
+- **Stale State Guard:** Added UI validation to ignore asynchronous credential callback responses if the user changed the toggle position while the check was queued.
+- **Automated Regression Tests:** Expanded `PostProcessConfigurationGuardTest` with test cases verifying configuration resolution across valid, absent, and unreadable credentials.
+
 # v0.3.2 — Optimized 5-bit Quantization (Nemotron 3.5 Q5_K_M)
 
 - **Default Model Upgrade to 5-bit (`Q5_K_M`):** Replaced the default bundled speech recognition model artifact from `nemotron-3.5-asr-streaming-0.6b-Q8_0.gguf` (751 MB) with `nemotron-3.5-asr-streaming-0.6b-Q5_K_M.gguf` (560 MB), achieving a 25.5% storage saving.
